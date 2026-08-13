@@ -61,16 +61,22 @@ def _db_conn():
 
 
 def _configured_credentials():
-    """Read provider credentials from the environment named by local config.
-
-    Argus intentionally never mines credentials from usage stores or router
-    databases. This keeps the public source tree and client contract clean.
-    """
+    """Read provider credentials from the environment named by local config."""
     return {
         provider: _provider_credential(provider)
         for provider in PROVIDER_LABELS
         if _provider_enabled(provider) and _provider_credential(provider)
     }
+
+
+def _configured_provider_ids():
+    """Local-first provider list, independent of any 9Router database."""
+    providers = settings.get("sources.providers", {}) or {}
+    return [provider for provider, value in providers.items() if isinstance(value, dict) and value.get("enabled")]
+
+
+def _database_available() -> bool:
+    return bool(DB_PATH) and DB_PATH.exists()
 
 
 # ── Usage from 9router DB ─────────────────────────────────────────────────────
@@ -386,19 +392,24 @@ def _mimo_quota(session_cookie: str):
     return {"plan": plan or "MiMo Token Plan", "quotas": quotas} if quotas else {"message": "MiMo connected. No quota data returned."}
 
 def providers():
-    """Provider connections + live quota via 9router API (falls back to DB)."""
-    auth = RouterAuth()
-    api = auth.get("/api/providers") or {}
-    conns = api.get("connections", [])
+    """Provider connections and quota, with no 9Router dependency in local mode."""
+    router_enabled = bool(settings.get("sources.router.enabled", False))
+    auth = RouterAuth() if router_enabled else None
+    api = auth.get("/api/providers") if auth else {}
+    conns = (api or {}).get("connections", [])
 
-    if not conns:
-        # Fallback: read connection list from DB
+    if not conns and _database_available() and bool(settings.get("sources.usage_store.enabled", False)):
         conn = _db_conn()
-        rows = conn.execute(
-            "SELECT id, provider, authType, name, isActive FROM providerConnections"
-        ).fetchall()
+        rows = conn.execute("SELECT id, provider, authType, name, isActive FROM providerConnections").fetchall()
         conn.close()
         conns = [dict(r) for r in rows]
+
+    # A fresh local install has neither router records nor a usage database.
+    # Create the same provider shape directly from machine-local config.
+    known = {str(connection.get("provider")) for connection in conns}
+    for provider in _configured_provider_ids():
+        if provider not in known:
+            conns.append({"id": None, "provider": provider, "authType": "apikey", "name": "Local", "isActive": True, "testStatus": "active"})
 
     keys = _configured_credentials()
     out = []
@@ -416,7 +427,7 @@ def providers():
             "expiresAt": c.get("expiresAt"),
         }
         # Live quota from 9router usage handler
-        if c.get("id"):
+        if c.get("id") and auth:
             quota = auth.get(f"/api/usage/{c['id']}")
             # Only trust the router's quota when it actually has window data;
             # a message-only dict (e.g. "Usage not available...") must not
