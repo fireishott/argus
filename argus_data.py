@@ -36,18 +36,24 @@ DB_PATH = Path(str(settings.get("sources.usage_store.sqlite_path", ""))).expandu
 
 
 def _provider_credential(provider: str) -> str:
-    """Read a configured secret, preferring macOS Keychain in local-first mode."""
+    """Read a local secret without letting a background Keychain denial blank it."""
+    env_value = settings.env_value(f"sources.providers.{provider}.credential_env")
     if sys.platform == "darwin" and bool(settings.get("local_first.keychain_credentials", False)):
         try:
-            return subprocess.check_output(
+            keychain_value = subprocess.check_output(
                 ["/usr/bin/security", "find-generic-password", "-s", "Argus.Provider", "-a", provider, "-w"],
                 text=True,
                 stderr=subprocess.DEVNULL,
                 timeout=3,
             ).strip()
+            if keychain_value:
+                return keychain_value
         except (subprocess.SubprocessError, OSError):
-            return ""
-    return settings.env_value(f"sources.providers.{provider}.credential_env")
+            pass
+    # The LaunchAgent stages Keychain values in a mode-600, per-user runtime
+    # env file at launch. This fallback is required when macOS denies a fresh
+    # Keychain query to a non-interactive background process.
+    return env_value
 
 
 def _provider_enabled(provider: str) -> bool:
