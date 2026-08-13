@@ -897,18 +897,15 @@ final class ArgusStatusItems {
     private func configure(_ item: NSStatusItem, target: StatusTarget, provider: ProviderUsage?, preferences: ArgusPreferences, settingsWindow: ArgusSettingsWindow?, dashboardURL: URL?) {
         guard let button = item.button else { return }
         let color = statusNSColor(target: target, preferences: preferences)
-        let image = ProviderIcon.image(for: target.provider) ?? NSImage(
+        let icon = ProviderIcon.image(for: target.provider) ?? NSImage(
             systemSymbolName: ProviderIcon.fallbackSymbol(for: target.provider),
             accessibilityDescription: target.label
-        )?.withSymbolConfiguration(.init(pointSize: 12, weight: .semibold))
-        image?.isTemplate = true
-        button.image = image
-        button.imagePosition = .imageLeft
-        button.contentTintColor = color
-        button.attributedTitle = NSAttributedString(string: target.valueText, attributes: [
-            .foregroundColor: color,
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
-        ])
+        )
+        let renderedIcon = icon?.resized(to: NSSize(width: 14, height: 14)) ?? NSImage(size: NSSize(width: 14, height: 14))
+        button.image = statusComposite(icon: renderedIcon, text: target.valueText, color: color)
+        button.imagePosition = .imageOnly
+        button.contentTintColor = nil
+        button.title = ""
         let peek = provider?.quickPeek ?? "\(target.shortLabel): \(target.valueText) - \(target.statusText)"
         button.toolTip = peek
         button.setAccessibilityLabel(peek)
@@ -939,6 +936,26 @@ final class ArgusStatusItems {
         }
         if target.status == "in_use" { return .systemGreen }
         return .white
+    }
+
+    private func statusComposite(icon: NSImage, text: String, color: NSColor) -> NSImage {
+        let iconSize = NSSize(width: 14, height: 14)
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        let textAttrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+        let textSize = (text as NSString).size(withAttributes: textAttrs)
+        let spacing: CGFloat = 2
+        let width = iconSize.width + spacing + ceil(textSize.width)
+        let height = max(iconSize.height, ceil(textSize.height))
+        let tintedIcon = icon.tinted(with: color)
+        let output = NSImage(size: NSSize(width: width, height: height))
+        output.lockFocus()
+        tintedIcon.draw(in: NSRect(x: 0, y: (height - iconSize.height) / 2, width: iconSize.width, height: iconSize.height))
+        (text as NSString).draw(
+            in: NSRect(x: iconSize.width + spacing, y: (height - textSize.height) / 2, width: ceil(textSize.width), height: ceil(textSize.height)),
+            withAttributes: textAttrs
+        )
+        output.unlockFocus()
+        return output
     }
 
     private func providerSymbol(_ provider: String) -> String {
@@ -993,6 +1010,31 @@ struct ProviderDetailView: View {
         }
         .padding(14)
         .frame(width: 310)
+    }
+}
+
+extension NSImage {
+    func resized(to newSize: NSSize) -> NSImage {
+        let output = NSImage(size: newSize)
+        output.lockFocus()
+        NSGraphicsContext.current?.imageInterpolation = .high
+        draw(in: NSRect(origin: .zero, size: newSize), from: .zero, operation: .sourceOver, fraction: 1)
+        output.unlockFocus()
+        return output
+    }
+
+    func tinted(with color: NSColor) -> NSImage {
+        let output = NSImage(size: size)
+        output.lockFocus()
+        let rect = NSRect(origin: .zero, size: size)
+        // Draw the source first to establish the shape/alpha mask.
+        draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
+        // Then replace the opaque pixels with the target color, keeping alpha.
+        NSGraphicsContext.current?.cgContext.setBlendMode(.sourceAtop)
+        color.set()
+        rect.fill()
+        output.unlockFocus()
+        return output
     }
 }
 
