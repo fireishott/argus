@@ -200,7 +200,9 @@ struct ArgusPopover: View {
 
             Divider()
             HStack {
-                SettingsLink("Settings")
+                SettingsLink {
+                    Text("Settings")
+                }
                 Spacer()
                 Button("Open Dashboard") { store.openDashboard() }
                     .disabled(store.dashboardURL == nil)
