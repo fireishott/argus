@@ -401,9 +401,10 @@ struct PersistedPreferences: Codable {
     var unavailableColor: StoredColor = .white
     var providerOrder: [ProviderPreference] = []
     var statusTargetOrder: [StatusTargetPreference] = []
-    var showControlItem = true
+    var showControlItem = false
     var installedIndividualTargetLayout = false
     var statusLayoutRevision = 0
+    var controlItemMigrationRevision = 0
 }
 
 enum StoredColor: String, Codable, CaseIterable, Identifiable {
@@ -436,6 +437,13 @@ final class ArgusPreferences: ObservableObject {
         }
         // Old alpha builds stored only provider-level menu items. Keep those
         // defaults, but let new provider/window targets populate on refresh.
+        // The dedicated graph control was an alpha experiment. Provider items
+        // are the real surface, so remove that control from existing installs.
+        if values.controlItemMigrationRevision < 1 {
+            values.showControlItem = false
+            values.controlItemMigrationRevision = 1
+            save()
+        }
     }
 
     var iconMode: IconMode { values.iconMode }
