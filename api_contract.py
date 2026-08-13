@@ -95,11 +95,10 @@ def snapshot(providers: list[dict[str, Any]], balances: dict[str, Any], dashboar
         aggregate = next((window.get("remaining_percent") for window in windows if window.get("id") == "5h"), None)
         if aggregate is None and windows:
             aggregate = windows[0].get("remaining_percent")
-        if aggregate is not None:
-            status_targets.append({
-                "id": f"provider:{key}", "provider": key, "kind": "provider",
-                "label": str(item["label"]), "remaining_percent": aggregate,
-            })
+        status_targets.append({
+            "id": f"provider:{key}", "provider": key, "kind": "provider",
+            "label": str(item["label"]), "remaining_percent": aggregate,
+        })
         for label, window in (quota.get("quotas") or {}).items():
             if not isinstance(window, dict):
                 continue
