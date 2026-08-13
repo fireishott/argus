@@ -996,8 +996,8 @@ final class ArgusStatusItems {
 
     private func statusBarComposite(icon: NSImage, remainingPercent: Int?, color: NSColor) -> NSImage {
         let iconSize = NSSize(width: 14, height: 14)
-        let barWidth: CGFloat = 20
-        let barHeight: CGFloat = 5
+        let barWidth: CGFloat = 5
+        let barHeight: CGFloat = 14
         let spacing: CGFloat = 2
         let width = iconSize.width + spacing + barWidth
         let height = max(iconSize.height, barHeight)
@@ -1009,11 +1009,11 @@ final class ArgusStatusItems {
         let barX = iconSize.width + spacing
         let barY = (height - barHeight) / 2
         NSColor.white.withAlphaComponent(0.22).setFill()
-        NSBezierPath(roundedRect: NSRect(x: barX, y: barY, width: barWidth, height: barHeight), xRadius: barHeight / 2, yRadius: barHeight / 2).fill()
-        let fillWidth = barWidth * used
-        if fillWidth > 0 {
+        NSBezierPath(roundedRect: NSRect(x: barX, y: barY, width: barWidth, height: barHeight), xRadius: 1, yRadius: 1).fill()
+        let fillHeight = barHeight * used
+        if fillHeight > 0 {
             color.setFill()
-            NSBezierPath(roundedRect: NSRect(x: barX, y: barY, width: fillWidth, height: barHeight), xRadius: barHeight / 2, yRadius: barHeight / 2).fill()
+            NSBezierPath(roundedRect: NSRect(x: barX, y: barY, width: barWidth, height: fillHeight), xRadius: 1, yRadius: 1).fill()
         }
         output.unlockFocus()
         return output
@@ -1021,8 +1021,8 @@ final class ArgusStatusItems {
 
     private func statusGaugeComposite(icon: NSImage, remainingPercent: Int?, color: NSColor) -> NSImage {
         let iconSize = NSSize(width: 14, height: 14)
-        let gaugeWidth: CGFloat = 16
-        let gaugeHeight: CGFloat = 8
+        let gaugeWidth: CGFloat = 6
+        let gaugeHeight: CGFloat = 14
         let spacing: CGFloat = 2
         let width = iconSize.width + spacing + gaugeWidth
         let height = max(iconSize.height, gaugeHeight)
@@ -1033,14 +1033,14 @@ final class ArgusStatusItems {
         tintedIcon.draw(in: NSRect(x: 0, y: (height - iconSize.height) / 2, width: iconSize.width, height: iconSize.height))
         let gaugeX = iconSize.width + spacing
         let gaugeY = (height - gaugeHeight) / 2
-        let tank = NSBezierPath(roundedRect: NSRect(x: gaugeX, y: gaugeY, width: gaugeWidth, height: gaugeHeight), xRadius: 2, yRadius: 2)
+        let tank = NSBezierPath(roundedRect: NSRect(x: gaugeX, y: gaugeY, width: gaugeWidth, height: gaugeHeight), xRadius: 1, yRadius: 1)
         NSColor.white.withAlphaComponent(0.35).setStroke()
         tank.lineWidth = 1
         tank.stroke()
-        let fillWidth = gaugeWidth * used
-        if fillWidth > 0 {
+        let fillHeight = gaugeHeight * used
+        if fillHeight > 0 {
             color.setFill()
-            NSBezierPath(roundedRect: NSRect(x: gaugeX, y: gaugeY, width: fillWidth, height: gaugeHeight), xRadius: 2, yRadius: 2).fill()
+            NSBezierPath(roundedRect: NSRect(x: gaugeX, y: gaugeY, width: gaugeWidth, height: fillHeight), xRadius: 1, yRadius: 1).fill()
         }
         output.unlockFocus()
         return output
