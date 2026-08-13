@@ -111,6 +111,27 @@ def usage_summary(days: int = 30):
     return [dict(r) for r in rows]
 
 
+def recent_provider_activity(seconds: int = 90) -> set[str]:
+    """Providers with successfully routed 9Router traffic in the last window.
+
+    This is read-only against the live usage ledger. It lets menu-bar marks
+    distinguish real active traffic (green) from a healthy standby connection.
+    """
+    if not _database_available() or not bool(settings.get("sources.usage_store.enabled", False)):
+        return set()
+    since = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=seconds)).isoformat()
+    conn = _db_conn()
+    try:
+        rows = conn.execute(
+            """SELECT DISTINCT provider FROM usageHistory
+               WHERE timestamp >= ? AND lower(COALESCE(status, 'ok')) IN ('ok', 'success', 'completed')""",
+            (since,),
+        ).fetchall()
+        return {str(row["provider"]) for row in rows if row["provider"]}
+    finally:
+        conn.close()
+
+
 def usage_by_day(days: int = 14):
     """Daily totals: requests, tokens, cost."""
     since = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)).isoformat()

@@ -51,7 +51,10 @@ def _balance(provider: str, balances: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def snapshot(providers: list[dict[str, Any]], balances: dict[str, Any], dashboard_url: str = "") -> dict[str, Any]:
+def snapshot(
+    providers: list[dict[str, Any]], balances: dict[str, Any], dashboard_url: str = "", active_providers: set[str] | None = None
+) -> dict[str, Any]:
+    active_providers = active_providers or set()
     public_providers: list[dict[str, Any]] = []
     status_targets: list[dict[str, Any]] = []
     low_quota_count = 0
@@ -82,6 +85,8 @@ def snapshot(providers: list[dict[str, Any]], balances: dict[str, Any], dashboar
         status = "active" if provider.get("isActive", True) else "inactive"
         if provider.get("testStatus") not in (None, "unknown", "active"):
             status = "degraded"
+        if status == "active" and key in active_providers:
+            status = "in_use"
         item: dict[str, Any] = {
             "provider": key,
             "label": str(provider.get("label") or key),

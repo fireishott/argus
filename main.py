@@ -49,6 +49,7 @@ def v1_snapshot():
         argus_data.providers(),
         argus_data.balances(),
         str(settings.get("integrations.kallisti.dashboard_url", "")),
+        argus_data.recent_provider_activity(),
     )
 
 
