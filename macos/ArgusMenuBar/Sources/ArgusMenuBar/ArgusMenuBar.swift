@@ -896,17 +896,19 @@ final class ArgusStatusItems {
 
     private func configure(_ item: NSStatusItem, target: StatusTarget, provider: ProviderUsage?, preferences: ArgusPreferences, settingsWindow: ArgusSettingsWindow?, dashboardURL: URL?) {
         guard let button = item.button else { return }
-        let color = statusColor(target: target, preferences: preferences)
+        let color = statusNSColor(target: target, preferences: preferences)
         let image = ProviderIcon.image(for: target.provider) ?? NSImage(
             systemSymbolName: ProviderIcon.fallbackSymbol(for: target.provider),
             accessibilityDescription: target.label
         )?.withSymbolConfiguration(.init(pointSize: 12, weight: .semibold))
         image?.isTemplate = true
         button.image = image
-        button.contentTintColor = NSColor(color)
         button.imagePosition = .imageLeft
-        button.title = target.valueText
-        button.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        button.contentTintColor = color
+        button.attributedTitle = NSAttributedString(string: target.valueText, attributes: [
+            .foregroundColor: color,
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        ])
         let peek = provider?.quickPeek ?? "\(target.shortLabel): \(target.valueText) - \(target.statusText)"
         button.toolTip = peek
         button.setAccessibilityLabel(peek)
@@ -929,13 +931,14 @@ final class ArgusStatusItems {
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     }
 
-    private func statusColor(target: StatusTarget, preferences: ArgusPreferences) -> Color {
-        if target.status == "inactive" || target.status == "unavailable" { return .red }
+    private func statusNSColor(target: StatusTarget, preferences: ArgusPreferences) -> NSColor {
+        if target.status == "inactive" || target.status == "unavailable" { return .systemRed }
         if let remaining = target.remainingPercent {
-            if remaining <= preferences.values.criticalThreshold { return .red }
-            if remaining <= preferences.values.warningThreshold { return .yellow }
+            if remaining <= preferences.values.criticalThreshold { return .systemRed }
+            if remaining <= preferences.values.warningThreshold { return .systemYellow }
         }
-        return target.status == "in_use" ? .green : .white
+        if target.status == "in_use" { return .systemGreen }
+        return .white
     }
 
     private func providerSymbol(_ provider: String) -> String {
