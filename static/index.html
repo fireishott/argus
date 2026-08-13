@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Argus</title>
+<style>
+:root { color-scheme: dark; --bg:#0c0c10; --panel:#15151c; --line:#282833; --text:#f1f1f4; --muted:#9a9aa7; --ok:#47c27a; --warn:#f3a534; --bad:#ed5c65; }
+* { box-sizing:border-box; }
+body { margin:0; background:radial-gradient(circle at 20% -10%,#1d1d31,transparent 38%),var(--bg); color:var(--text); font:14px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+main { max-width:1240px; margin:0 auto; padding:42px 26px; }
+header { display:flex; align-items:end; justify-content:space-between; gap:18px; margin-bottom:30px; }
+h1 { margin:0; font-size:31px; letter-spacing:-.8px; } h1 span { color:var(--muted); font-weight:500; }
+#updated { color:var(--muted); font-size:12px; }
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px; }
+.card { background:linear-gradient(160deg,rgba(255,255,255,.035),transparent 60%),var(--panel); border:1px solid var(--line); border-radius:14px; padding:17px; min-height:158px; }
+.card-head { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:16px; }
+.provider { display:flex; align-items:center; gap:9px; font-weight:700; font-size:16px; }.dot { width:9px; height:9px; border-radius:50%; background:var(--ok); }.inactive .dot { background:var(--muted); }.degraded .dot { background:var(--warn); }
+.window { margin:12px 0; }.window-row { display:flex; justify-content:space-between; gap:8px; color:var(--muted); font-size:12px; }.window-row strong { color:var(--text); font-weight:650; }
+.bar { height:7px; overflow:hidden; background:#252530; border-radius:99px; margin-top:6px; }.fill { height:100%; background:var(--ok); border-radius:99px; }.fill.warn { background:var(--warn); }.fill.bad { background:var(--bad); }
+.balance { margin-top:15px; color:var(--muted); font-size:12px; }.balance strong { color:var(--text); font-size:14px; }
+.empty { color:var(--muted); padding:25px 0; } .error { color:#ff9fa5; }
+</style>
+</head>
+<body>
+<main>
+<header><div><h1>Argus <span>/ model usage</span></h1><div id="updated">Connecting</div></div></header>
+<section class="grid" id="providers"><div class="empty">Loading usage snapshot</div></section>
+</main>
+<script>
+const asTime = value => value ? new Date(value).toLocaleString() : 'reset unknown';
+const state = percent => percent == null ? '' : percent <= 5 ? 'bad' : percent <= 15 ? 'warn' : '';
+function providerCard(provider) {
+  const status = provider.status || 'inactive';
+  const windows = (provider.windows || []).map(window => {
+    const percentage = window.remaining_percent;
+    const label = percentage == null ? 'n/a' : `${percentage}% left`;
+    return `<div class="window"><div class="window-row"><span>${window.label} · ${asTime(window.reset_at)}</span><strong>${label}</strong></div><div class="bar"><div class="fill ${state(percentage)}" style="width:${percentage ?? 0}%"></div></div></div>`;
+  }).join('') || '<div class="empty">No quota window exposed by this provider.</div>';
+  const balance = provider.balance ? `<div class="balance">Balance <strong>${provider.balance.currency} ${provider.balance.remaining.toFixed(2)}</strong></div>` : '';
+  return `<article class="card ${status}"><div class="card-head"><div class="provider"><i class="dot"></i>${provider.label}</div><span>${status}</span></div>${windows}${balance}</article>`;
+}
+async function load() {
+  const response = await fetch('/api/v1/snapshot', { headers: { Accept: 'application/json' }});
+  if (!response.ok) throw new Error(`Snapshot unavailable (${response.status})`);
+  const snapshot = await response.json();
+  document.querySelector('#providers').innerHTML = snapshot.providers.map(providerCard).join('') || '<div class="empty">No enabled providers.</div>';
+  document.querySelector('#updated').textContent = `Updated ${new Date(snapshot.generated_at).toLocaleString()} · ${snapshot.summary.low_quota_count} low quota windows`;
+}
+load().catch(error => { document.querySelector('#providers').innerHTML = `<div class="error">${error.message}</div>`; document.querySelector('#updated').textContent = 'Unable to load Argus'; });
+setInterval(() => load().catch(() => {}), 60000);
+</script>
+</body>
+</html>

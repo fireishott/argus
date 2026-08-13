@@ -1,0 +1,75 @@
+# Copy to config/config.yaml. This file is intentionally ignored by git.
+# No secrets belong here. Use environment variables or your platform secret store.
+server:
+  host: 127.0.0.1
+  port: 8090
+  public_base_url: http://127.0.0.1:8090
+  cors_origins: []
+
+refresh:
+  cache_seconds: 30
+
+sources:
+  router:
+    enabled: true
+    url: http://127.0.0.1:20128
+    password_env: ARGUS_ROUTER_PASSWORD
+  usage_store:
+    enabled: true
+    sqlite_path: /path/to/9router/data.sqlite
+  providers:
+    claude:
+      enabled: true
+      credential_env: ARGUS_CLAUDE_TOKEN
+    minimax:
+      enabled: true
+      credential_env: ARGUS_MINIMAX_API_KEY
+    opencode-go:
+      enabled: true
+      credential_env: ARGUS_OPENCODE_GO_API_KEY
+    openrouter:
+      enabled: true
+      credential_env: ARGUS_OPENROUTER_API_KEY
+    deepseek:
+      enabled: true
+      credential_env: ARGUS_DEEPSEEK_API_KEY
+    xiaomi-tokenplan:
+      enabled: false
+      credential_env: ARGUS_MIMO_SESSION_COOKIE
+      # Example only. Point at the provider's documented API base path.
+      base_url: https://provider.example.invalid/api/v1
+
+api:
+  # Optional bearer token for /api/v1/* client-facing endpoints.
+  # Leave empty only on a trusted private network.
+  bearer_token_env: ARGUS_API_TOKEN
+  expose_internal_endpoints: false
+  redaction: strict
+
+integrations:
+  kallisti:
+    enabled: false
+    # Kallisti or its connector should call the public snapshot contract below.
+    snapshot_path: /api/v1/snapshot
+    health_path: /api/v1/health
+    minimum_schema_version: 1
+    polling_seconds: 60
+    alert_threshold_percent: 15
+    # Leave blank to disable deep links in the payload.
+    dashboard_url: ''
+
+macos:
+  refresh_seconds: 60
+  compact_provider_limit: 4
+  show_value: remaining_percent
+  low_quota_threshold_percent: 15
+  critical_quota_threshold_percent: 5
+
+logging:
+  level: INFO
+  redact_errors: true
+
+# Strict boundary:
+# - config.yaml is machine-local and gitignored.
+# - API tokens, cookies, database contents, account identifiers, and real host
+#   addresses never belong in commits, docs, screenshots, or telemetry.

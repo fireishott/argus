@@ -1,0 +1,37 @@
+# Local configuration and secrets
+config/config.yaml
+.env
+.env.*
+!.env.example
+creds/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+
+# macOS / Xcode
+.DS_Store
+DerivedData/
+.build/
+xcuserdata/
+*.xcuserstate
+
+# Build output
+dist/
+build/
+coverage/
+
+# Never commit captured usage payloads, logs, or screenshots
+artifacts/
+logs/
+*.log
+*.png
+*.jpg
+*.jpeg
