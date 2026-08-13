@@ -179,7 +179,7 @@ struct ProviderUsage: Decodable, Identifiable {
     let balance: Balance?
     var id: String { provider }
     var headline: String { windows.first.map { $0.remainingText } ?? balanceText ?? "n/a" }
-    var balanceText: String? { balance.map { "Balance: \($0.currency) \($0.remaining, specifier: "%.2f")" } }
+    var balanceText: String? { balance.map { "Balance: \($0.currency) \(String(format: "%.2f", $0.remaining))" } }
     var statusColor: Color { status == "active" ? .green : (status == "degraded" ? .orange : .secondary) }
     var accessibilitySummary: String { "\(label), \(headline), \(status)" }
 }
