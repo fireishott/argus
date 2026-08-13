@@ -101,7 +101,7 @@ enum ProviderIcon {
         "openrouter": "openrouter", "opencode-go": "opencode-go", "xiaomi-tokenplan": "mimo"
     ]
     static func image(for provider: String) -> NSImage? {
-        guard let name = assetNames[provider], let url = Bundle.module.url(forResource: name, withExtension: "svg", subdirectory: "icons"), let image = NSImage(contentsOf: url) else { return nil }
+        guard let name = assetNames[provider], let url = Bundle.module.url(forResource: name, withExtension: "svg"), let image = NSImage(contentsOf: url) else { return nil }
         image.isTemplate = true
         return image
     }
