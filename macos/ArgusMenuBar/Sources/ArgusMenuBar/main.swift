@@ -881,7 +881,9 @@ struct ArgusClient {
         var request = URLRequest(url: url)
         request.timeoutInterval = 12
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        if let token = Keychain.read(service: "Argus", account: "api-token"), !token.isEmpty { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        // Local Argus binds to loopback and does not require a bearer token.
+        // Do not auto-read Keychain during refresh: background auth prompts can
+        // block the macOS desktop without an interactive input path.
         let (data, response) = try await URLSession.shared.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
         decoder.dateDecodingStrategy = .iso8601
