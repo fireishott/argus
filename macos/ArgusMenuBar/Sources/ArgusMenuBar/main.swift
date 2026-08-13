@@ -371,6 +371,7 @@ struct PersistedPreferences: Codable {
     var providerOrder: [ProviderPreference] = []
     var statusTargetOrder: [StatusTargetPreference] = []
     var installedIndividualTargetLayout = false
+    var statusLayoutRevision = 0
 }
 
 enum StoredColor: String, Codable, CaseIterable, Identifiable {
@@ -440,24 +441,27 @@ final class ArgusPreferences: ObservableObject {
     }
 
     func syncTargets(_ targets: [StatusTarget]) {
-        if !values.installedIndividualTargetLayout {
-            let preferred = [
-                "window:claude:session-5h", "window:claude:weekly-7d",
-                "window:minimax:m-series-5h", "window:minimax:m-series-7d",
-                "balance:deepseek", "balance:openrouter",
-                "window:opencode-go:session-5h", "window:opencode-go:weekly-7d", "window:opencode-go:monthly-30d",
-            ]
-            let positions = Dictionary(uniqueKeysWithValues: preferred.enumerated().map { ($0.element, $0.offset) })
+        let preferred = [
+            "window:claude:session-5h", "window:claude:weekly-7d",
+            "window:minimax:m-series-5h", "window:minimax:m-series-7d",
+            "balance:deepseek", "balance:openrouter",
+            "window:opencode-go:session-5h", "window:opencode-go:weekly-7d", "window:opencode-go:monthly-30d",
+        ]
+        let positions = Dictionary(uniqueKeysWithValues: preferred.enumerated().map { ($0.element, $0.offset) })
+        // Revision 2 repairs the first alpha migration, which could run while
+        // an upstream quota API was temporarily unavailable and pin nothing.
+        if values.statusLayoutRevision < 2 {
             values.statusTargetOrder = targets
                 .sorted { positions[$0.id, default: .max] < positions[$1.id, default: .max] }
                 .map { StatusTargetPreference(id: $0.id, enabled: preferred.contains($0.id)) }
             values.installedIndividualTargetLayout = true
+            values.statusLayoutRevision = 2
             save()
             return
         }
         let known = Set(values.statusTargetOrder.map(\.id))
         let additions = targets.filter { !known.contains($0.id) }.map { target in
-            StatusTargetPreference(id: target.id, enabled: false)
+            StatusTargetPreference(id: target.id, enabled: preferred.contains(target.id))
         }
         guard !additions.isEmpty else { return }
         values.statusTargetOrder.append(contentsOf: additions)
