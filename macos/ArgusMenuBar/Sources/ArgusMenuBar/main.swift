@@ -795,6 +795,75 @@ final class UsageStore: ObservableObject {
     func openDashboard() { if let dashboardURL { NSWorkspace.shared.open(dashboardURL) } }
 }
 
+@MainActor
+final class ArgusStatusItems {
+    private var items: [String: NSStatusItem] = [:]
+
+    func update(targets: [StatusTarget], preferences: ArgusPreferences) {
+        let wanted = Set(targets.map(\.id))
+        for (id, item) in items where !wanted.contains(id) {
+            NSStatusBar.system.removeStatusItem(item)
+            items.removeValue(forKey: id)
+        }
+        for target in targets {
+            let item = items[target.id] ?? NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+            items[target.id] = item
+            configure(item, target: target, preferences: preferences)
+        }
+    }
+
+    private func configure(_ item: NSStatusItem, target: StatusTarget, preferences: ArgusPreferences) {
+        guard let button = item.button else { return }
+        let color = statusColor(target: target, preferences: preferences)
+        let symbol = providerSymbol(target.provider)
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: target.label)?
+            .withSymbolConfiguration(.init(pointSize: 12, weight: .semibold))
+        image?.isTemplate = false
+        button.image = image?.tinted(with: NSColor(color))
+        button.imagePosition = .imageLeft
+        button.title = target.statusText
+        button.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        button.toolTip = "\(target.label): \(target.valueText) - \(target.statusText)"
+        button.accessibilityLabel = button.toolTip
+    }
+
+    private func statusColor(target: StatusTarget, preferences: ArgusPreferences) -> Color {
+        // 9Router / provider status wins: failed or disabled is red. A healthy
+        // connected provider with no current request is white standby. Quota
+        // turns yellow/red only when it is approaching or at its limit.
+        if target.status == "inactive" || target.status == "unavailable" { return .red }
+        if let remaining = target.remainingPercent {
+            if remaining <= preferences.values.criticalThreshold { return .red }
+            if remaining <= preferences.values.warningThreshold { return .yellow }
+        }
+        return target.status == "in_use" ? .green : .white
+    }
+
+    private func providerSymbol(_ provider: String) -> String {
+        switch provider {
+        case "claude": "sparkle"
+        case "deepseek": "wave.3.right"
+        case "minimax": "bolt"
+        case "openrouter": "arrow.triangle.branch"
+        case "opencode-go": "chevron.left.forwardslash.chevron.right"
+        default: "cpu"
+        }
+    }
+}
+
+extension NSImage {
+    func tinted(with color: NSColor) -> NSImage {
+        let output = NSImage(size: size)
+        output.lockFocus()
+        color.set()
+        let rect = NSRect(origin: .zero, size: size)
+        rect.fill(using: .sourceAtop)
+        draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
+        output.unlockFocus()
+        return output
+    }
+}
+
 struct ArgusClient {
     private let decoder = JSONDecoder()
     func snapshot() async throws -> SnapshotPayload {
@@ -825,9 +894,10 @@ struct StatusTarget: Decodable, Identifiable {
     let provider: String
     let kind: String
     let label: String
+    let status: String
     let remainingPercent: Int?
     let balance: Balance?
-    enum CodingKeys: String, CodingKey { case id, provider, kind, label, balance, remainingPercent = "remaining_percent" }
+    enum CodingKeys: String, CodingKey { case id, provider, kind, label, status, balance, remainingPercent = "remaining_percent" }
     var valueText: String {
         if let balance { return "\(balance.currency)\(String(format: "%.2f", balance.remaining))" }
         return remainingPercent.map { "\($0)%" } ?? "n/a"
@@ -840,6 +910,18 @@ struct StatusTarget: Decodable, Identifiable {
         if lower.contains("7d") { return "7d" }
         if lower.contains("30d") { return "30d" }
         return "Use"
+    }
+    var shortLabel: String {
+        let providerName = provider == "opencode-go" ? "OpenCode" : provider.capitalized
+        return compactLabel.isEmpty ? providerName : "\(providerName) \(compactLabel)"
+    }
+    var statusText: String {
+        switch status {
+        case "in_use": "Active"
+        case "inactive", "unavailable": "Unavailable"
+        case "degraded": "Degraded"
+        default: "Standby"
+        }
     }
 }
 
