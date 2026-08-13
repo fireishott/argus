@@ -507,6 +507,7 @@ final class ArgusPreferences: ObservableObject {
 struct ArgusSettingsView: View {
     @ObservedObject var preferences: ArgusPreferences
     let statusTargets: [StatusTarget]
+    @State private var selectedTargetID: String?
     @State private var providerNames: [String: String] = [:]
 
     var body: some View {
@@ -537,21 +538,36 @@ struct ArgusSettingsView: View {
                 Stepper("Critical at \(preferences.values.criticalThreshold)% or below", value: binding(\.criticalThreshold), in: 0...preferences.values.warningThreshold)
             }
             Section("Status bar layout") {
-                Text("Pin a provider, a specific quota window, or a balance. Drag rows to set the left-to-right order in the menu bar.")
+                Text("Select an item, then pin it, remove it, or move it. The pinned list is the exact left-to-right menu-bar order.")
                     .font(.caption).foregroundStyle(.secondary)
-                List {
-                    ForEach(orderedTargets) { target in
-                        Toggle(isOn: targetEnabledBinding(target.id)) {
-                            HStack(spacing: 7) {
-                                TargetMark(provider: target.provider, iconMode: preferences.iconMode)
-                                    .foregroundStyle(preferences.color(for: target.remainingPercent))
-                                Text(target.label)
-                                Spacer()
-                                Text(target.valueText).monospacedDigit().foregroundStyle(.secondary)
-                            }
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Available").font(.caption).foregroundStyle(.secondary)
+                        List(selection: $selectedTargetID) {
+                            ForEach(availableTargets) { target in targetRow(target) }
                         }
-                    }.onMove(perform: moveTargets)
-                }.frame(minHeight: 245)
+                    }
+                    VStack(spacing: 8) {
+                        Button(action: pinSelected) { Image(systemName: "arrow.right") }
+                            .disabled(!canPinSelected)
+                        Button(action: unpinSelected) { Image(systemName: "arrow.left") }
+                            .disabled(!canUnpinSelected)
+                        Divider().frame(height: 18)
+                        Button(action: moveSelectedLeft) { Image(systemName: "chevron.left") }
+                            .disabled(!canMoveSelectedLeft)
+                        Button(action: moveSelectedRight) { Image(systemName: "chevron.right") }
+                            .disabled(!canMoveSelectedRight)
+                    }
+                    .buttonStyle(.bordered)
+                    .padding(.top, 28)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Pinned to status bar").font(.caption).foregroundStyle(.secondary)
+                        List(selection: $selectedTargetID) {
+                            ForEach(pinnedTargets) { target in targetRow(target) }
+                        }
+                    }
+                }
+                .frame(minHeight: 250)
             }
         }.formStyle(.grouped)
     }
@@ -564,14 +580,45 @@ struct ArgusSettingsView: View {
         let positions = Dictionary(uniqueKeysWithValues: preferences.values.statusTargetOrder.enumerated().map { ($0.element.id, $0.offset) })
         return statusTargets.sorted { positions[$0.id, default: .max] < positions[$1.id, default: .max] }
     }
-    private func targetEnabledBinding(_ id: String) -> Binding<Bool> {
-        Binding(get: { preferences.values.statusTargetOrder.first(where: { $0.id == id })?.enabled ?? false }, set: { enabled in preferences.update { values in
+    private var pinnedTargets: [StatusTarget] { orderedTargets.filter { isPinned($0.id) } }
+    private var availableTargets: [StatusTarget] { orderedTargets.filter { !isPinned($0.id) } }
+    private func isPinned(_ id: String) -> Bool { preferences.values.statusTargetOrder.first(where: { $0.id == id })?.enabled ?? false }
+    private var canPinSelected: Bool { selectedTargetID.map { !isPinned($0) } ?? false }
+    private var canUnpinSelected: Bool { selectedTargetID.map(isPinned) ?? false }
+    private var selectedPinnedIndex: Int? { guard let selectedTargetID else { return nil }; return pinnedTargets.firstIndex(where: { $0.id == selectedTargetID }) }
+    private var canMoveSelectedLeft: Bool { (selectedPinnedIndex ?? 0) > 0 }
+    private var canMoveSelectedRight: Bool { guard let index = selectedPinnedIndex else { return false }; return index < pinnedTargets.count - 1 }
+
+    @ViewBuilder private func targetRow(_ target: StatusTarget) -> some View {
+        HStack(spacing: 7) {
+            TargetMark(provider: target.provider, iconMode: preferences.iconMode).foregroundStyle(preferences.color(for: target.remainingPercent))
+            Text(target.label).lineLimit(1)
+            Spacer()
+            Text(target.valueText).monospacedDigit().foregroundStyle(.secondary)
+        }
+        .tag(target.id)
+    }
+    private func pinSelected() { setPinned(selectedTargetID, true) }
+    private func unpinSelected() { setPinned(selectedTargetID, false) }
+    private func setPinned(_ id: String?, _ enabled: Bool) {
+        guard let id else { return }
+        preferences.update { values in
             guard let index = values.statusTargetOrder.firstIndex(where: { $0.id == id }) else { return }
             values.statusTargetOrder[index].enabled = enabled
-        } })
+        }
     }
-    private func moveTargets(from offsets: IndexSet, to destination: Int) {
-        preferences.update { $0.statusTargetOrder.move(fromOffsets: offsets, toOffset: destination) }
+    private func moveSelectedLeft() { moveSelected(by: -1) }
+    private func moveSelectedRight() { moveSelected(by: 1) }
+    private func moveSelected(by offset: Int) {
+        guard let id = selectedTargetID, let current = pinnedTargets.firstIndex(where: { $0.id == id }) else { return }
+        let pinned = pinnedTargets.map(\.id)
+        let destination = current + offset
+        guard pinned.indices.contains(destination) else { return }
+        let swapID = pinned[destination]
+        preferences.update { values in
+            guard let source = values.statusTargetOrder.firstIndex(where: { $0.id == id }), let target = values.statusTargetOrder.firstIndex(where: { $0.id == swapID }) else { return }
+            values.statusTargetOrder.swapAt(source, target)
+        }
     }
 }
 
