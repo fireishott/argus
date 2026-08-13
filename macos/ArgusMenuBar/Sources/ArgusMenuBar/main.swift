@@ -51,6 +51,7 @@ struct StatusTargetChip: View {
         let color = preferences.color(for: target.remainingPercent)
         HStack(spacing: 3) {
             TargetMark(provider: target.provider, iconMode: preferences.iconMode).foregroundStyle(color)
+            Text(target.compactLabel).font(.system(size: 9, weight: .medium, design: .rounded)).foregroundStyle(.secondary)
             switch preferences.displayMode {
             case .usageBar:
                 UsageBar(remainingPercent: target.remainingPercent, preferences: preferences)
@@ -369,6 +370,7 @@ struct PersistedPreferences: Codable {
     var unavailableColor: StoredColor = .white
     var providerOrder: [ProviderPreference] = []
     var statusTargetOrder: [StatusTargetPreference] = []
+    var installedIndividualTargetLayout = false
 }
 
 enum StoredColor: String, Codable, CaseIterable, Identifiable {
@@ -438,10 +440,24 @@ final class ArgusPreferences: ObservableObject {
     }
 
     func syncTargets(_ targets: [StatusTarget]) {
+        if !values.installedIndividualTargetLayout {
+            let preferred = [
+                "window:claude:session-5h", "window:claude:weekly-7d",
+                "window:minimax:m-series-5h", "window:minimax:m-series-7d",
+                "balance:deepseek", "balance:openrouter",
+                "window:opencode-go:session-5h", "window:opencode-go:weekly-7d", "window:opencode-go:monthly-30d",
+            ]
+            let positions = Dictionary(uniqueKeysWithValues: preferred.enumerated().map { ($0.element, $0.offset) })
+            values.statusTargetOrder = targets
+                .sorted { positions[$0.id, default: .max] < positions[$1.id, default: .max] }
+                .map { StatusTargetPreference(id: $0.id, enabled: preferred.contains($0.id)) }
+            values.installedIndividualTargetLayout = true
+            save()
+            return
+        }
         let known = Set(values.statusTargetOrder.map(\.id))
         let additions = targets.filter { !known.contains($0.id) }.map { target in
-            // Preserve the old default: provider-level chips start enabled.
-            StatusTargetPreference(id: target.id, enabled: target.kind == "provider")
+            StatusTargetPreference(id: target.id, enabled: false)
         }
         guard !additions.isEmpty else { return }
         values.statusTargetOrder.append(contentsOf: additions)
@@ -746,6 +762,15 @@ struct StatusTarget: Decodable, Identifiable {
     var valueText: String {
         if let balance { return "\(balance.currency)\(String(format: "%.2f", balance.remaining))" }
         return remainingPercent.map { "\($0)%" } ?? "n/a"
+    }
+    var compactLabel: String {
+        if kind == "balance" { return "Bal" }
+        guard kind == "window" else { return "" }
+        let lower = label.lowercased()
+        if lower.contains("5h") { return "5h" }
+        if lower.contains("7d") { return "7d" }
+        if lower.contains("30d") { return "30d" }
+        return "Use"
     }
 }
 
