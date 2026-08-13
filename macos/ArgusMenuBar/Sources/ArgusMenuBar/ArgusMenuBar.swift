@@ -904,7 +904,7 @@ final class ArgusStatusItems {
             accessibilityDescription: target.label
         )
         let renderedIcon = icon?.resized(to: NSSize(width: 14, height: 14)) ?? NSImage(size: NSSize(width: 14, height: 14))
-        button.image = statusComposite(icon: renderedIcon, text: target.valueText, iconColor: color, textColor: textColor)
+        button.image = statusItemImage(icon: renderedIcon, target: target, preferences: preferences, iconColor: color, textColor: textColor)
         button.imagePosition = .imageOnly
         button.contentTintColor = nil
         button.title = ""
@@ -965,6 +965,83 @@ final class ArgusStatusItems {
             in: NSRect(x: iconSize.width + spacing, y: (height - textSize.height) / 2, width: ceil(textSize.width), height: ceil(textSize.height)),
             withAttributes: textAttrs
         )
+        output.unlockFocus()
+        return output
+    }
+
+    private func statusItemImage(icon: NSImage, target: StatusTarget, preferences: ArgusPreferences, iconColor: NSColor, textColor: NSColor) -> NSImage {
+        switch preferences.values.displayMode {
+        case .usageBar:
+            return statusBarComposite(icon: icon, remainingPercent: target.remainingPercent, color: iconColor)
+        case .fuelGauge:
+            return statusGaugeComposite(icon: icon, remainingPercent: target.remainingPercent, color: iconColor)
+        case .iconOnly:
+            return icon.tinted(with: iconColor)
+        default:
+            let text = statusValueText(for: target, preferences: preferences)
+            return statusComposite(icon: icon, text: text, iconColor: iconColor, textColor: textColor)
+        }
+    }
+
+    private func statusValueText(for target: StatusTarget, preferences: ArgusPreferences) -> String {
+        switch preferences.values.displayMode {
+        case .balance:
+            return target.balance?.displayText ?? target.remainingPercent.map { "\($0)%" } ?? "n/a"
+        case .remainingPercent:
+            return target.remainingPercent.map { "\($0)%" } ?? target.balance?.displayText ?? "n/a"
+        case .usageBar, .fuelGauge, .iconOnly:
+            return ""
+        }
+    }
+
+    private func statusBarComposite(icon: NSImage, remainingPercent: Int?, color: NSColor) -> NSImage {
+        let iconSize = NSSize(width: 14, height: 14)
+        let barWidth: CGFloat = 20
+        let barHeight: CGFloat = 5
+        let spacing: CGFloat = 2
+        let width = iconSize.width + spacing + barWidth
+        let height = max(iconSize.height, barHeight)
+        let used = CGFloat(max(0, min(100, 100 - (remainingPercent ?? 0)))) / 100.0
+        let tintedIcon = icon.tinted(with: color)
+        let output = NSImage(size: NSSize(width: width, height: height))
+        output.lockFocus()
+        tintedIcon.draw(in: NSRect(x: 0, y: (height - iconSize.height) / 2, width: iconSize.width, height: iconSize.height))
+        let barX = iconSize.width + spacing
+        let barY = (height - barHeight) / 2
+        NSColor.white.withAlphaComponent(0.22).setFill()
+        NSBezierPath(roundedRect: NSRect(x: barX, y: barY, width: barWidth, height: barHeight), xRadius: barHeight / 2, yRadius: barHeight / 2).fill()
+        let fillWidth = barWidth * used
+        if fillWidth > 0 {
+            color.setFill()
+            NSBezierPath(roundedRect: NSRect(x: barX, y: barY, width: fillWidth, height: barHeight), xRadius: barHeight / 2, yRadius: barHeight / 2).fill()
+        }
+        output.unlockFocus()
+        return output
+    }
+
+    private func statusGaugeComposite(icon: NSImage, remainingPercent: Int?, color: NSColor) -> NSImage {
+        let iconSize = NSSize(width: 14, height: 14)
+        let gaugeWidth: CGFloat = 16
+        let gaugeHeight: CGFloat = 8
+        let spacing: CGFloat = 2
+        let width = iconSize.width + spacing + gaugeWidth
+        let height = max(iconSize.height, gaugeHeight)
+        let used = CGFloat(max(0, min(100, 100 - (remainingPercent ?? 0)))) / 100.0
+        let tintedIcon = icon.tinted(with: color)
+        let output = NSImage(size: NSSize(width: width, height: height))
+        output.lockFocus()
+        tintedIcon.draw(in: NSRect(x: 0, y: (height - iconSize.height) / 2, width: iconSize.width, height: iconSize.height))
+        let gaugeX = iconSize.width + spacing
+        let gaugeY = (height - gaugeHeight) / 2
+        let tank = NSBezierPath(roundedRect: NSRect(x: gaugeX, y: gaugeY, width: gaugeWidth, height: gaugeHeight), xRadius: 2, yRadius: 2)
+        NSColor.white.withAlphaComponent(0.35).setStroke()
+        tank.lineWidth = 1
+        tank.stroke()
+        let fillWidth = gaugeWidth * used
+        if fillWidth > 0 {
+            color.setFill()
+            NSBezierPath(roundedRect: NSRect(x: gaugeX, y: gaugeY, width: fillWidth, height: gaugeHeight), xRadius: 2, yRadius: 2).fill()
+        }
         output.unlockFocus()
         return output
     }
