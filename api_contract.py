@@ -41,8 +41,13 @@ def _balance(provider: str, balances: dict[str, Any]) -> dict[str, Any] | None:
         return None
     for key in ("credits_remaining", "limit_remaining", "total_balance"):
         value = item.get(key)
-        if isinstance(value, (int, float)):
-            return {"kind": "credit", "remaining": round(value, 2), "currency": "USD"}
+        if value is None:
+            continue
+        try:
+            amount = float(str(value))
+        except ValueError:
+            continue
+        return {"kind": "credit", "remaining": round(amount, 2), "currency": "USD"}
     return None
 
 
