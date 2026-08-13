@@ -281,6 +281,7 @@ final class ArgusSettingsWindow: ObservableObject {
             NSApp.activate(ignoringOtherApps: true)
             return
         }
+        guard let store else { return }
         let hosting = NSHostingController(rootView: ArgusSettingsView(preferences: preferences, store: store))
         let window = NSWindow(contentViewController: hosting)
         window.title = "Argus Settings"
