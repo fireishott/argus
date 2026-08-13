@@ -898,12 +898,13 @@ final class ArgusStatusItems {
     private func configure(_ item: NSStatusItem, target: StatusTarget, provider: ProviderUsage?, preferences: ArgusPreferences, settingsWindow: ArgusSettingsWindow?, dashboardURL: URL?) {
         guard let button = item.button else { return }
         let color = statusNSColor(target: target, preferences: preferences)
+        let textColor = statusTextNSColor(target: target, preferences: preferences)
         let icon = ProviderIcon.image(for: target.provider) ?? NSImage(
             systemSymbolName: ProviderIcon.fallbackSymbol(for: target.provider),
             accessibilityDescription: target.label
         )
         let renderedIcon = icon?.resized(to: NSSize(width: 14, height: 14)) ?? NSImage(size: NSSize(width: 14, height: 14))
-        button.image = statusComposite(icon: renderedIcon, text: target.valueText, color: color)
+        button.image = statusComposite(icon: renderedIcon, text: target.valueText, iconColor: color, textColor: textColor)
         button.imagePosition = .imageOnly
         button.contentTintColor = nil
         button.title = ""
@@ -939,15 +940,24 @@ final class ArgusStatusItems {
         return .white
     }
 
-    private func statusComposite(icon: NSImage, text: String, color: NSColor) -> NSImage {
+    private func statusTextNSColor(target: StatusTarget, preferences: ArgusPreferences) -> NSColor {
+        if target.status == "inactive" || target.status == "unavailable" { return .systemRed }
+        if let remaining = target.remainingPercent {
+            if remaining <= preferences.values.criticalThreshold { return .systemRed }
+            if remaining <= preferences.values.warningThreshold { return .systemYellow }
+        }
+        return .white
+    }
+
+    private func statusComposite(icon: NSImage, text: String, iconColor: NSColor, textColor: NSColor) -> NSImage {
         let iconSize = NSSize(width: 14, height: 14)
         let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
-        let textAttrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+        let textAttrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: textColor]
         let textSize = (text as NSString).size(withAttributes: textAttrs)
         let spacing: CGFloat = 2
         let width = iconSize.width + spacing + ceil(textSize.width)
         let height = max(iconSize.height, ceil(textSize.height))
-        let tintedIcon = icon.tinted(with: color)
+        let tintedIcon = icon.tinted(with: iconColor)
         let output = NSImage(size: NSSize(width: width, height: height))
         output.lockFocus()
         tintedIcon.draw(in: NSRect(x: 0, y: (height - iconSize.height) / 2, width: iconSize.width, height: iconSize.height))
