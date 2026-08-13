@@ -102,7 +102,7 @@ def snapshot(providers: list[dict[str, Any]], balances: dict[str, Any], dashboar
             aggregate = windows[0].get("remaining_percent")
         status_targets.append({
             "id": f"provider:{key}", "provider": key, "kind": "provider",
-            "label": str(item["label"]), "remaining_percent": aggregate,
+            "label": str(item["label"]), "remaining_percent": aggregate, "status": status,
         })
         for label, window in (quota.get("quotas") or {}).items():
             if not isinstance(window, dict):
@@ -113,12 +113,12 @@ def snapshot(providers: list[dict[str, Any]], balances: dict[str, Any], dashboar
             normalized = str(label).lower().replace(" ", "-").replace("/", "-").replace("(", "").replace(")", "")
             status_targets.append({
                 "id": f"window:{key}:{normalized}", "provider": key, "kind": "window",
-                "label": f"{item['label']} - {label}", "remaining_percent": remaining,
+                "label": f"{item['label']} - {label}", "remaining_percent": remaining, "status": status,
             })
         if balance:
             status_targets.append({
                 "id": f"balance:{key}", "provider": key, "kind": "balance",
-                "label": f"{item['label']} - balance", "balance": balance,
+                "label": f"{item['label']} - balance", "balance": balance, "status": status,
             })
 
     return {

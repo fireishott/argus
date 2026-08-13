@@ -63,7 +63,8 @@ for pair in \
   'deepseek:ARGUS_DEEPSEEK_API_KEY' \
   'minimax:ARGUS_MINIMAX_API_KEY' \
   'opencode-go:ARGUS_OPENCODE_GO_API_KEY' \
-  'claude:ARGUS_CLAUDE_TOKEN'; do
+  'claude:ARGUS_CLAUDE_TOKEN' \
+  'router-password:ARGUS_ROUTER_PASSWORD'; do
   account="${pair%%:*}"
   variable="${pair##*:}"
   if value=$(/usr/bin/security find-generic-password -s 'Argus.Provider' -a "$account" -w 2>/dev/null); then

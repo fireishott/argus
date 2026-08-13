@@ -12,7 +12,7 @@ struct ArgusMenuBarApp: App {
         MenuBarExtra {
             ArgusPopover(store: store, preferences: preferences, settingsWindow: settingsWindow)
         } label: {
-            StatusBarProviders(store: store, preferences: preferences)
+            ControlStatusIcon(store: store, preferences: preferences)
         }
         .menuBarExtraStyle(.window)
 
@@ -23,6 +23,18 @@ struct ArgusMenuBarApp: App {
 }
 
 // MARK: - Menu bar
+
+/// The fixed Argus eye is only the control surface. Each selected target below
+/// is a separate NSStatusItem, so macOS sees and positions them independently.
+struct ControlStatusIcon: View {
+    @ObservedObject var store: UsageStore
+    @ObservedObject var preferences: ArgusPreferences
+    var body: some View {
+        Image(systemName: store.error == nil ? "eye" : "eye.slash")
+            .task { await store.start(refreshSeconds: preferences.refreshSeconds, preferences: preferences) }
+            .accessibilityLabel("Argus controls")
+    }
+}
 
 struct StatusBarProviders: View {
     @ObservedObject var store: UsageStore
@@ -742,6 +754,8 @@ enum ProviderVerifier {
 final class UsageStore: ObservableObject {
     @Published var providers: [ProviderUsage] = []
     @Published var statusTargets: [StatusTarget] = []
+    private let statusItems = ArgusStatusItems()
+    private var preferencesForStatusItems: ArgusPreferences?
     @Published var error: String?
     @Published var dashboardURL: URL?
     @Published var lastUpdatedText = "Not updated"
@@ -750,7 +764,8 @@ final class UsageStore: ObservableObject {
 
     deinit { refreshTask?.cancel() }
 
-    func start(refreshSeconds: Int) async {
+    func start(refreshSeconds: Int, preferences: ArgusPreferences) async {
+        preferencesForStatusItems = preferences
         guard refreshTask == nil else { return }
         await refresh()
         refreshTask = Task { [weak self] in
@@ -766,6 +781,9 @@ final class UsageStore: ObservableObject {
             let payload = try await client.snapshot()
             providers = payload.providers
             statusTargets = payload.statusTargets
+            if let preferencesForStatusItems {
+                statusItems.update(targets: preferencesForStatusItems.orderedEnabledTargets(from: payload.statusTargets), preferences: preferencesForStatusItems)
+            }
             dashboardURL = payload.links.dashboardURL
             lastUpdatedText = "Updated now"
             error = nil
