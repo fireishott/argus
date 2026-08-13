@@ -166,7 +166,6 @@ struct ProviderMark: View {
 struct ArgusPopover: View {
     @ObservedObject var store: UsageStore
     @ObservedObject var preferences: ArgusPreferences
-    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -181,7 +180,7 @@ struct ArgusPopover: View {
                     Image(systemName: "arrow.clockwise")
                 }
                 .buttonStyle(.plain)
-                Button { openSettings() } label: {
+                SettingsLink {
                     Image(systemName: "gearshape")
                 }
                 .buttonStyle(.plain)
@@ -201,7 +200,7 @@ struct ArgusPopover: View {
 
             Divider()
             HStack {
-                Button("Settings") { openSettings() }
+                SettingsLink("Settings")
                 Spacer()
                 Button("Open Dashboard") { store.openDashboard() }
                     .disabled(store.dashboardURL == nil)
