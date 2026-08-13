@@ -53,20 +53,26 @@ def snapshot(providers: list[dict[str, Any]], balances: dict[str, Any], dashboar
         key = str(provider.get("provider") or "")
         if not key:
             continue
-        windows = []
+        # Providers can return the same quota window once per model bucket.
+        # Argus presents one actionable row per window and keeps the lowest
+        # remaining value, which is the constrained value the user needs to see.
+        windows_by_id: dict[str, dict[str, Any]] = {}
         quota = provider.get("quota") or {}
         for label, window in (quota.get("quotas") or {}).items():
             if not isinstance(window, dict):
                 continue
             remaining = _remaining_percent(window)
-            if remaining is not None and remaining <= 15:
-                low_quota_count += 1
-            entry = {"id": _window_id(str(label)), "label": str(label)}
+            window_id = _window_id(str(label))
+            entry = {"id": window_id, "label": str(label)}
             if remaining is not None:
                 entry["remaining_percent"] = remaining
             if window.get("resetAt"):
                 entry["reset_at"] = str(window["resetAt"])
-            windows.append(entry)
+            current = windows_by_id.get(window_id)
+            if current is None or (remaining is not None and remaining < current.get("remaining_percent", 101)):
+                windows_by_id[window_id] = entry
+        windows = list(windows_by_id.values())
+        low_quota_count += sum(1 for window in windows if window.get("remaining_percent", 101) <= 15)
         status = "active" if provider.get("isActive", True) else "inactive"
         if provider.get("testStatus") not in (None, "unknown", "active"):
             status = "degraded"

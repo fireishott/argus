@@ -6,10 +6,11 @@ import SwiftUI
 struct ArgusMenuBarApp: App {
     @StateObject private var store = UsageStore()
     @StateObject private var preferences = ArgusPreferences()
+    @StateObject private var settingsWindow = ArgusSettingsWindow()
 
     var body: some Scene {
         MenuBarExtra {
-            ArgusPopover(store: store, preferences: preferences)
+            ArgusPopover(store: store, preferences: preferences, settingsWindow: settingsWindow)
         } label: {
             StatusBarProviders(store: store, preferences: preferences)
         }
@@ -92,6 +93,27 @@ struct UsageBar: View {
     }
 }
 
+struct ConsumptionBar: View {
+    let remainingPercent: Int?
+    @ObservedObject var preferences: ArgusPreferences
+
+    var body: some View {
+        let used = max(0, min(1, Double(100 - (remainingPercent ?? 0)) / 100))
+        Capsule()
+            .fill(.quaternary)
+            .overlay(alignment: .leading) {
+                GeometryReader { proxy in
+                    Capsule()
+                        .fill(preferences.usageGradient)
+                        .frame(width: proxy.size.width * used)
+                }
+                .clipShape(Capsule())
+            }
+            .frame(height: 6)
+            .accessibilityLabel("\(Int(used * 100)) percent used")
+    }
+}
+
 struct FuelGauge: View {
     let provider: ProviderUsage
     @ObservedObject var preferences: ArgusPreferences
@@ -166,6 +188,7 @@ struct ProviderMark: View {
 struct ArgusPopover: View {
     @ObservedObject var store: UsageStore
     @ObservedObject var preferences: ArgusPreferences
+    @ObservedObject var settingsWindow: ArgusSettingsWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -180,7 +203,7 @@ struct ArgusPopover: View {
                     Image(systemName: "arrow.clockwise")
                 }
                 .buttonStyle(.plain)
-                SettingsLink {
+                Button { settingsWindow.open(preferences: preferences) } label: {
                     Image(systemName: "gearshape")
                 }
                 .buttonStyle(.plain)
@@ -200,9 +223,7 @@ struct ArgusPopover: View {
 
             Divider()
             HStack {
-                SettingsLink {
-                    Text("Settings")
-                }
+                Button("Settings") { settingsWindow.open(preferences: preferences) }
                 Spacer()
                 Button("Open Dashboard") { store.openDashboard() }
                     .disabled(store.dashboardURL == nil)
@@ -210,6 +231,30 @@ struct ArgusPopover: View {
         }
         .padding(14)
         .frame(width: 390)
+    }
+}
+
+@MainActor
+final class ArgusSettingsWindow: ObservableObject {
+    private var controller: NSWindowController?
+
+    func open(preferences: ArgusPreferences) {
+        if let window = controller?.window {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let hosting = NSHostingController(rootView: ArgusSettingsView(preferences: preferences))
+        let window = NSWindow(contentViewController: hosting)
+        window.title = "Argus Settings"
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.setContentSize(NSSize(width: 560, height: 620))
+        window.isReleasedWhenClosed = false
+        let controller = NSWindowController(window: window)
+        self.controller = controller
+        controller.showWindow(nil)
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 }
 
@@ -225,7 +270,11 @@ struct ProviderRow: View {
                     .frame(width: 16)
                 Text(provider.label).fontWeight(.semibold)
                 Spacer()
-                Text(preferences.valueText(for: provider)).monospacedDigit()
+                if let balance = provider.balanceShortText {
+                    Text(balance).monospacedDigit()
+                } else {
+                    Text(preferences.valueText(for: provider)).monospacedDigit()
+                }
             }
             ForEach(provider.windows) { window in
                 VStack(alignment: .leading, spacing: 3) {
@@ -234,8 +283,7 @@ struct ProviderRow: View {
                         Spacer()
                         Text(window.remainingText).monospacedDigit()
                     }
-                    ProgressView(value: window.progress)
-                        .tint(preferences.color(for: window.remainingPercent))
+                    ConsumptionBar(remainingPercent: window.remainingPercent, preferences: preferences)
                 }
                 .font(.caption)
             }

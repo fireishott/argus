@@ -424,7 +424,9 @@ def providers():
     # Create the same provider shape directly from machine-local config.
     known = {str(connection.get("provider")) for connection in conns}
     for provider in _configured_provider_ids():
-        if provider not in known:
+        # MiniMax has its own direct quota adapter below. Adding a generic row
+        # here as well creates a duplicate provider in local-first mode.
+        if provider != "minimax" and provider not in known:
             conns.append({"id": None, "provider": provider, "authType": "apikey", "name": "Local", "isActive": True, "testStatus": "active"})
 
     keys = _configured_credentials()
