@@ -4,37 +4,32 @@ import SwiftUI
 
 @main
 struct ArgusMenuBarApp: App {
-    @StateObject private var store = UsageStore()
-    @StateObject private var preferences = ArgusPreferences()
-    @StateObject private var settingsWindow = ArgusSettingsWindow()
+    @NSApplicationDelegateAdaptor(ArgusAppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        MenuBarExtra {
-            ArgusPopover(store: store, preferences: preferences, settingsWindow: settingsWindow)
-        } label: {
-            ControlStatusIcon(store: store, preferences: preferences)
-        }
-        .menuBarExtraStyle(.window)
-
         Settings {
-            ArgusSettingsView(preferences: preferences, statusTargets: store.statusTargets)
+            ArgusSettingsView(preferences: appDelegate.preferences, statusTargets: appDelegate.store.statusTargets)
         }
+    }
+}
+
+@MainActor
+final class ArgusAppDelegate: NSObject, NSApplicationDelegate {
+    let store = UsageStore()
+    let preferences = ArgusPreferences()
+    let settingsWindow = ArgusSettingsWindow()
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+        store.configure(preferences: preferences, settingsWindow: settingsWindow)
+        Task { await store.start(refreshSeconds: preferences.refreshSeconds, preferences: preferences) }
     }
 }
 
 // MARK: - Menu bar
 
-/// The fixed Argus eye is only the control surface. Each selected target below
-/// is a separate NSStatusItem, so macOS sees and positions them independently.
-struct ControlStatusIcon: View {
-    @ObservedObject var store: UsageStore
-    @ObservedObject var preferences: ArgusPreferences
-    var body: some View {
-        Image(systemName: store.error == nil ? "eye" : "eye.slash")
-            .task { await store.start(refreshSeconds: preferences.refreshSeconds, preferences: preferences) }
-            .accessibilityLabel("Argus controls")
-    }
-}
+/// Every provider target and the optional Argus control are real NSStatusItems.
+/// macOS can therefore position them independently, just like Stats modules.
 
 struct StatusBarProviders: View {
     @ObservedObject var store: UsageStore
@@ -382,6 +377,7 @@ struct PersistedPreferences: Codable {
     var unavailableColor: StoredColor = .white
     var providerOrder: [ProviderPreference] = []
     var statusTargetOrder: [StatusTargetPreference] = []
+    var showControlItem = true
     var installedIndividualTargetLayout = false
     var statusLayoutRevision = 0
 }
@@ -540,6 +536,9 @@ struct ArgusSettingsView: View {
                 Picker("Refresh", selection: binding(\.refreshSeconds)) {
                     Text("30 seconds").tag(30); Text("60 seconds").tag(60); Text("2 minutes").tag(120); Text("5 minutes").tag(300)
                 }
+                Toggle("Show Argus control item", isOn: binding(\.showControlItem))
+                Text("Turn this off to hide the eye. Double-click any pinned provider item to open Settings.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Colors by remaining usage") {
                 Picker("Healthy", selection: binding(\.healthyColor)) { ForEach(StoredColor.allCases) { Text($0.label).tag($0) } }
@@ -765,6 +764,7 @@ final class UsageStore: ObservableObject {
     @Published var statusTargets: [StatusTarget] = []
     private let statusItems = ArgusStatusItems()
     private var preferencesForStatusItems: ArgusPreferences?
+    private weak var settingsWindowForStatusItems: ArgusSettingsWindow?
     @Published var error: String?
     @Published var dashboardURL: URL?
     @Published var lastUpdatedText = "Not updated"
@@ -772,6 +772,11 @@ final class UsageStore: ObservableObject {
     private var refreshTask: Task<Void, Never>?
 
     deinit { refreshTask?.cancel() }
+
+    func configure(preferences: ArgusPreferences, settingsWindow: ArgusSettingsWindow) {
+        preferencesForStatusItems = preferences
+        settingsWindowForStatusItems = settingsWindow
+    }
 
     func start(refreshSeconds: Int, preferences: ArgusPreferences) async {
         preferencesForStatusItems = preferences
@@ -791,7 +796,13 @@ final class UsageStore: ObservableObject {
             providers = payload.providers
             statusTargets = payload.statusTargets
             if let preferencesForStatusItems {
-                statusItems.update(targets: preferencesForStatusItems.orderedEnabledTargets(from: payload.statusTargets), preferences: preferencesForStatusItems)
+                statusItems.update(
+                    targets: preferencesForStatusItems.orderedEnabledTargets(from: payload.statusTargets),
+                    providers: payload.providers,
+                    preferences: preferencesForStatusItems,
+                    settingsWindow: settingsWindowForStatusItems,
+                    dashboardURL: payload.links.dashboardURL
+                )
             }
             dashboardURL = payload.links.dashboardURL
             lastUpdatedText = "Updated now"
@@ -807,21 +818,50 @@ final class UsageStore: ObservableObject {
 @MainActor
 final class ArgusStatusItems {
     private var items: [String: NSStatusItem] = [:]
+    private var handlers: [String: StatusItemHandler] = [:]
+    private var controlItem: NSStatusItem?
+    private var controlHandler: StatusItemHandler?
+    private let popover = NSPopover()
 
-    func update(targets: [StatusTarget], preferences: ArgusPreferences) {
+    func update(targets: [StatusTarget], providers: [ProviderUsage], preferences: ArgusPreferences, settingsWindow: ArgusSettingsWindow?, dashboardURL: URL?) {
+        updateControl(preferences: preferences, settingsWindow: settingsWindow)
         let wanted = Set(targets.map(\.id))
         for (id, item) in items where !wanted.contains(id) {
             NSStatusBar.system.removeStatusItem(item)
             items.removeValue(forKey: id)
+            handlers.removeValue(forKey: id)
         }
         for target in targets {
             let item = items[target.id] ?? NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
             items[target.id] = item
-            configure(item, target: target, preferences: preferences)
+            let provider = providers.first(where: { $0.provider == target.provider })
+            configure(item, target: target, provider: provider, preferences: preferences, settingsWindow: settingsWindow, dashboardURL: dashboardURL)
         }
     }
 
-    private func configure(_ item: NSStatusItem, target: StatusTarget, preferences: ArgusPreferences) {
+    private func updateControl(preferences: ArgusPreferences, settingsWindow: ArgusSettingsWindow?) {
+        guard preferences.values.showControlItem else {
+            if let controlItem { NSStatusBar.system.removeStatusItem(controlItem) }
+            controlItem = nil; controlHandler = nil
+            return
+        }
+        let item = controlItem ?? NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        controlItem = item
+        guard let button = item.button else { return }
+        button.image = NSImage(systemSymbolName: "chart.bar.xaxis", accessibilityDescription: "Argus controls")
+        button.image?.isTemplate = true
+        button.title = ""
+        button.toolTip = "Argus - click for Settings"
+        let handler = StatusItemHandler { [weak settingsWindow] event in
+            guard event.clickCount >= 1 else { return }
+            settingsWindow?.open(preferences: preferences, targets: [])
+        }
+        controlHandler = handler
+        button.target = handler
+        button.action = #selector(StatusItemHandler.handleClick(_:))
+    }
+
+    private func configure(_ item: NSStatusItem, target: StatusTarget, provider: ProviderUsage?, preferences: ArgusPreferences, settingsWindow: ArgusSettingsWindow?, dashboardURL: URL?) {
         guard let button = item.button else { return }
         let color = statusColor(target: target, preferences: preferences)
         let symbol = providerSymbol(target.provider)
@@ -832,14 +872,29 @@ final class ArgusStatusItems {
         button.imagePosition = .imageLeft
         button.title = target.valueText
         button.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
-        button.toolTip = "\(target.shortLabel): \(target.valueText) - \(target.statusText)"
-        button.setAccessibilityLabel(button.toolTip)
+        let peek = provider?.quickPeek ?? "\(target.shortLabel): \(target.valueText) - \(target.statusText)"
+        button.toolTip = peek
+        button.setAccessibilityLabel(peek)
+        let handler = StatusItemHandler { [weak self, weak settingsWindow, weak button] event in
+            guard let self else { return }
+            if event.clickCount >= 2 {
+                settingsWindow?.open(preferences: preferences, targets: [])
+            } else if let provider, let button {
+                self.presentDetail(provider: provider, from: button, dashboardURL: dashboardURL)
+            }
+        }
+        handlers[target.id] = handler
+        button.target = handler
+        button.action = #selector(StatusItemHandler.handleClick(_:))
+    }
+
+    private func presentDetail(provider: ProviderUsage, from button: NSStatusBarButton, dashboardURL: URL?) {
+        popover.contentViewController = NSHostingController(rootView: ProviderDetailView(provider: provider, dashboardURL: dashboardURL))
+        popover.behavior = .transient
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     }
 
     private func statusColor(target: StatusTarget, preferences: ArgusPreferences) -> Color {
-        // 9Router / provider status wins: failed or disabled is red. A healthy
-        // connected provider with no current request is white standby. Quota
-        // turns yellow/red only when it is approaching or at its limit.
         if target.status == "inactive" || target.status == "unavailable" { return .red }
         if let remaining = target.remainingPercent {
             if remaining <= preferences.values.criticalThreshold { return .red }
@@ -857,6 +912,48 @@ final class ArgusStatusItems {
         case "opencode-go": "chevron.left.forwardslash.chevron.right"
         default: "cpu"
         }
+    }
+}
+
+final class StatusItemHandler: NSObject {
+    private let action: (NSEvent) -> Void
+    init(action: @escaping (NSEvent) -> Void) { self.action = action }
+    @objc func handleClick(_ sender: Any?) { action(NSApp.currentEvent ?? NSEvent()) }
+}
+
+struct ProviderDetailView: View {
+    let provider: ProviderUsage
+    let dashboardURL: URL?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(provider.label).font(.headline)
+                Spacer()
+                Text(provider.status.capitalized).font(.caption).foregroundStyle(.secondary)
+            }
+            if let balance = provider.balanceShortText {
+                LabeledContent("Balance", value: balance).monospacedDigit()
+            }
+            if !provider.windows.isEmpty {
+                Divider()
+                ForEach(provider.windows) { window in
+                    HStack {
+                        Text(window.label)
+                        Spacer()
+                        Text(window.remainingText).monospacedDigit().foregroundStyle(.secondary)
+                    }
+                }
+            }
+            Divider()
+            HStack {
+                Text("Hover: quick peek").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                if let dashboardURL { Link("Dashboard", destination: dashboardURL) }
+            }
+        }
+        .padding(14)
+        .frame(width: 310)
     }
 }
 
@@ -949,6 +1046,11 @@ struct ProviderUsage: Decodable, Identifiable {
     var monogram: String { label.split(separator: " ").prefix(2).map { String($0.prefix(1)) }.joined().uppercased() }
     var symbolName: String { "cpu" }
     var tooltip: String { "\(label): \(windows.map { "\($0.label) \($0.remainingText)" }.joined(separator: ", "))" }
+    var quickPeek: String {
+        let quota = windows.map { "\($0.label): \($0.remainingText)" }.joined(separator: " | ")
+        let balancePart = balanceShortText.map { " | Balance: \($0)" } ?? ""
+        return "\(label) - \(status.capitalized)\(quota.isEmpty ? "" : " | \(quota)")\(balancePart)"
+    }
     var accessibilitySummary: String { "\(label), \(tooltip), \(status)" }
 }
 
