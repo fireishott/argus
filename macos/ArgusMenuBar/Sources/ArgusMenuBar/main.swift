@@ -81,12 +81,31 @@ struct TargetMark: View {
     let iconMode: IconMode
     var body: some View {
         switch iconMode {
-        case .brandMark: Image(systemName: symbol).frame(width: 14, height: 14)
-        case .monogram: Text(String(provider.prefix(2)).uppercased()).font(.system(size: 10, weight: .bold, design: .rounded)).frame(minWidth: 14)
-        case .systemSymbol: Image(systemName: symbol).font(.system(size: 12, weight: .semibold))
+        case .brandMark:
+            if let image = ProviderIcon.image(for: provider) {
+                Image(nsImage: image).resizable().scaledToFit().frame(width: 14, height: 14)
+            } else {
+                Image(systemName: ProviderIcon.fallbackSymbol(for: provider)).frame(width: 14, height: 14)
+            }
+        case .monogram:
+            Text(String(provider.prefix(2)).uppercased()).font(.system(size: 10, weight: .bold, design: .rounded)).frame(minWidth: 14)
+        case .systemSymbol:
+            Image(systemName: ProviderIcon.fallbackSymbol(for: provider)).font(.system(size: 12, weight: .semibold))
         }
     }
-    private var symbol: String {
+}
+
+enum ProviderIcon {
+    private static let assetNames: [String: String] = [
+        "claude": "claude", "deepseek": "deepseek", "minimax": "minimax",
+        "openrouter": "openrouter", "opencode-go": "opencode-go", "xiaomi-tokenplan": "mimo"
+    ]
+    static func image(for provider: String) -> NSImage? {
+        guard let name = assetNames[provider], let url = Bundle.module.url(forResource: name, withExtension: "svg", subdirectory: "icons"), let image = NSImage(contentsOf: url) else { return nil }
+        image.isTemplate = true
+        return image
+    }
+    static func fallbackSymbol(for provider: String) -> String {
         switch provider {
         case "claude": "sparkle"; case "deepseek": "wave.3.right"; case "minimax": "bolt"; case "openrouter": "arrow.triangle.branch"; case "opencode-go": "chevron.left.forwardslash.chevron.right"; default: "cpu"
         }
@@ -870,10 +889,11 @@ final class ArgusStatusItems {
     private func configure(_ item: NSStatusItem, target: StatusTarget, provider: ProviderUsage?, preferences: ArgusPreferences, settingsWindow: ArgusSettingsWindow?, dashboardURL: URL?) {
         guard let button = item.button else { return }
         let color = statusColor(target: target, preferences: preferences)
-        let symbol = providerSymbol(target.provider)
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: target.label)?
-            .withSymbolConfiguration(.init(pointSize: 12, weight: .semibold))
-        image?.isTemplate = false
+        let image = ProviderIcon.image(for: target.provider) ?? NSImage(
+            systemSymbolName: ProviderIcon.fallbackSymbol(for: target.provider),
+            accessibilityDescription: target.label
+        )?.withSymbolConfiguration(.init(pointSize: 12, weight: .semibold))
+        image?.isTemplate = true
         button.image = image?.tinted(with: NSColor(color))
         button.imagePosition = .imageLeft
         button.title = target.valueText
