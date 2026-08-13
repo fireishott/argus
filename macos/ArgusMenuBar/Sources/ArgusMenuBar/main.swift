@@ -529,7 +529,7 @@ struct ArgusSettingsView: View {
                 .tabItem { Label("Configuration", systemImage: "key.horizontal") }
         }
         .padding()
-        .frame(width: 560, height: 620)
+        .frame(width: 760, height: 760)
     }
 
     private var displayTab: some View {
@@ -555,9 +555,7 @@ struct ArgusSettingsView: View {
                 HStack(alignment: .top, spacing: 12) {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Available").font(.caption).foregroundStyle(.secondary)
-                        List(selection: $selectedTargetID) {
-                            ForEach(availableTargets) { target in targetRow(target) }
-                        }
+                        targetList(availableTargets)
                     }
                     VStack(spacing: 8) {
                         Button(action: pinSelected) { Image(systemName: "arrow.right") }
@@ -574,9 +572,7 @@ struct ArgusSettingsView: View {
                     .padding(.top, 28)
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Pinned to status bar").font(.caption).foregroundStyle(.secondary)
-                        List(selection: $selectedTargetID) {
-                            ForEach(pinnedTargets) { target in targetRow(target) }
-                        }
+                        targetList(pinnedTargets)
                     }
                 }
                 .frame(minHeight: 250)
@@ -601,14 +597,32 @@ struct ArgusSettingsView: View {
     private var canMoveSelectedLeft: Bool { (selectedPinnedIndex ?? 0) > 0 }
     private var canMoveSelectedRight: Bool { guard let index = selectedPinnedIndex else { return false }; return index < pinnedTargets.count - 1 }
 
+    @ViewBuilder private func targetList(_ targets: [StatusTarget]) -> some View {
+        ScrollView {
+            LazyVStack(spacing: 3) {
+                ForEach(targets) { target in
+                    Button { selectedTargetID = target.id } label: { targetRow(target) }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 7).padding(.vertical, 5)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(selectedTargetID == target.id ? Color.accentColor.opacity(0.28) : .clear)
+                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                }
+            }
+            .padding(4)
+        }
+        .frame(minWidth: 285, maxWidth: .infinity, minHeight: 235, maxHeight: 235)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+    }
+
     @ViewBuilder private func targetRow(_ target: StatusTarget) -> some View {
         HStack(spacing: 7) {
             TargetMark(provider: target.provider, iconMode: preferences.iconMode).foregroundStyle(preferences.color(for: target.remainingPercent))
             Text(target.shortLabel).lineLimit(1)
-            Spacer()
+            Spacer(minLength: 6)
             Text(target.valueText).monospacedDigit().foregroundStyle(.secondary)
         }
-        .tag(target.id)
+        .contentShape(Rectangle())
     }
     private func pinSelected() { setPinned(selectedTargetID, true) }
     private func unpinSelected() { setPinned(selectedTargetID, false) }
@@ -650,7 +664,6 @@ struct ProviderConfigurationView: View {
                         Text(item.label).tag(item.id)
                     }
                 }
-                .onChange(of: selectedID) { _, _ in loadStoredCredential() }
 
                 LabeledContent("Authentication", value: provider.auth.label)
                 if !provider.models.isEmpty {
@@ -666,9 +679,7 @@ struct ProviderConfigurationView: View {
                     HStack {
                         Button(isVerifying ? "Verifying..." : "Verify and Save") { verifyAndSave() }
                             .disabled(credential.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isVerifying)
-                        if Keychain.read(service: "Argus.Provider", account: provider.id) != nil {
-                            Button("Remove", role: .destructive) { Keychain.remove(service: "Argus.Provider", account: provider.id); credential = ""; status = "Removed from this Mac." }
-                        }
+                        Button("Remove", role: .destructive) { Keychain.remove(service: "Argus.Provider", account: provider.id); credential = ""; status = "Removed from this Mac." }
                     }
                     Text("Saved only in this Mac's Keychain. Argus never displays it again.")
                         .font(.caption).foregroundStyle(.secondary)
@@ -683,10 +694,8 @@ struct ProviderConfigurationView: View {
             }
         }
         .formStyle(.grouped)
-        .onAppear(perform: loadStoredCredential)
     }
 
-    private func loadStoredCredential() { credential = Keychain.read(service: "Argus.Provider", account: provider.id) ?? ""; status = "" }
     private func verifyAndSave() {
         let value = credential.trimmingCharacters(in: .whitespacesAndNewlines)
         isVerifying = true; status = "Verifying \(provider.label)..."

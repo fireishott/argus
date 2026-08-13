@@ -55,22 +55,15 @@ YAML
   chmod 600 "$CONFIG"
 fi
 
-# Only the service process reads the secrets. Values never appear in logs or API responses.
-: > "$ENV_FILE"
+# Background launch agents must never query macOS Keychain. Keychain access can
+# create a SecurityAgent password prompt with no usable remote input path. The
+# service reads this pre-staged, user-owned mode-600 file only. Provider changes
+# are applied by the interactive Argus app, not by the background launcher.
+if [[ ! -f "$ENV_FILE" ]]; then
+  umask 077
+  : > "$ENV_FILE"
+fi
 chmod 600 "$ENV_FILE"
-for pair in \
-  'openrouter:ARGUS_OPENROUTER_API_KEY' \
-  'deepseek:ARGUS_DEEPSEEK_API_KEY' \
-  'minimax:ARGUS_MINIMAX_API_KEY' \
-  'opencode-go:ARGUS_OPENCODE_GO_API_KEY' \
-  'claude:ARGUS_CLAUDE_TOKEN' \
-  'router-password:ARGUS_ROUTER_PASSWORD'; do
-  account="${pair%%:*}"
-  variable="${pair##*:}"
-  if value=$(/usr/bin/security find-generic-password -s 'Argus.Provider' -a "$account" -w 2>/dev/null); then
-    printf '%s=%s\n' "$variable" "$value" >> "$ENV_FILE"
-  fi
-done
 
 cd "$REPO"
 export ARGUS_CONFIG="$CONFIG"
