@@ -915,6 +915,7 @@ final class ArgusStatusItems {
     }
 }
 
+@MainActor
 final class StatusItemHandler: NSObject {
     private let action: (NSEvent) -> Void
     init(action: @escaping (NSEvent) -> Void) { self.action = action }
