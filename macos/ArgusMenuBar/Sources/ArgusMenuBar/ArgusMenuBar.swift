@@ -567,7 +567,7 @@ struct ArgusSettingsView: View {
                 Picker("Provider mark", selection: binding(\.iconMode)) { ForEach(IconMode.allCases) { Text($0.label).tag($0) } }
                 Picker("Value next to mark", selection: binding(\.displayMode)) { ForEach(DisplayMode.allCases) { Text($0.label).tag($0) } }
                 Picker("Refresh", selection: binding(\.refreshSeconds)) {
-                    Text("30 seconds").tag(30); Text("60 seconds").tag(60); Text("2 minutes").tag(120); Text("5 minutes").tag(300)
+                    Text("5 seconds").tag(5); Text("15 seconds").tag(15); Text("30 seconds").tag(30); Text("60 seconds").tag(60); Text("2 minutes").tag(120); Text("5 minutes").tag(300)
                 }
                 Toggle("Show Argus control item", isOn: binding(\.showControlItem))
                 Text("Turn this off to hide the eye. Double-click any pinned provider item to open Settings.")
@@ -817,7 +817,8 @@ final class UsageStore: ObservableObject {
         await refresh()
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(refreshSeconds))
+                let interval = self?.preferencesForStatusItems?.values.refreshSeconds ?? refreshSeconds
+                try? await Task.sleep(for: .seconds(interval))
                 await self?.refresh()
             }
         }
