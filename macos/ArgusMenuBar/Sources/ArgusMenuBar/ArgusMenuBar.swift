@@ -1008,12 +1008,17 @@ final class ArgusStatusItems {
         tintedIcon.draw(in: NSRect(x: 0, y: (height - iconSize.height) / 2, width: iconSize.width, height: iconSize.height))
         let barX = iconSize.width + spacing
         let barY = (height - barHeight) / 2
+        let radius = barWidth / 2
+        let track = NSBezierPath(roundedRect: NSRect(x: barX, y: barY, width: barWidth, height: barHeight), xRadius: radius, yRadius: radius)
         NSColor.white.withAlphaComponent(0.22).setFill()
-        NSBezierPath(roundedRect: NSRect(x: barX, y: barY, width: barWidth, height: barHeight), xRadius: 1, yRadius: 1).fill()
+        track.fill()
         let fillHeight = barHeight * used
         if fillHeight > 0 {
+            NSGraphicsContext.saveGraphicsState()
+            track.addClip()
             color.setFill()
-            NSBezierPath(roundedRect: NSRect(x: barX, y: barY, width: barWidth, height: fillHeight), xRadius: 1, yRadius: 1).fill()
+            NSRect(x: barX, y: barY, width: barWidth, height: fillHeight).fill()
+            NSGraphicsContext.restoreGraphicsState()
         }
         output.unlockFocus()
         return output
@@ -1021,7 +1026,7 @@ final class ArgusStatusItems {
 
     private func statusGaugeComposite(icon: NSImage, remainingPercent: Int?, color: NSColor) -> NSImage {
         let iconSize = NSSize(width: 14, height: 14)
-        let gaugeWidth: CGFloat = 6
+        let gaugeWidth: CGFloat = 7
         let gaugeHeight: CGFloat = 14
         let spacing: CGFloat = 2
         let width = iconSize.width + spacing + gaugeWidth
@@ -1033,15 +1038,21 @@ final class ArgusStatusItems {
         tintedIcon.draw(in: NSRect(x: 0, y: (height - iconSize.height) / 2, width: iconSize.width, height: iconSize.height))
         let gaugeX = iconSize.width + spacing
         let gaugeY = (height - gaugeHeight) / 2
-        let tank = NSBezierPath(roundedRect: NSRect(x: gaugeX, y: gaugeY, width: gaugeWidth, height: gaugeHeight), xRadius: 1, yRadius: 1)
-        NSColor.white.withAlphaComponent(0.35).setStroke()
-        tank.lineWidth = 1
-        tank.stroke()
+        let radius: CGFloat = 2
+        let tank = NSBezierPath(roundedRect: NSRect(x: gaugeX, y: gaugeY, width: gaugeWidth, height: gaugeHeight), xRadius: radius, yRadius: radius)
+        NSColor.white.withAlphaComponent(0.18).setFill()
+        tank.fill()
         let fillHeight = gaugeHeight * used
         if fillHeight > 0 {
+            NSGraphicsContext.saveGraphicsState()
+            tank.addClip()
             color.setFill()
-            NSBezierPath(roundedRect: NSRect(x: gaugeX, y: gaugeY, width: gaugeWidth, height: fillHeight), xRadius: 1, yRadius: 1).fill()
+            NSRect(x: gaugeX, y: gaugeY, width: gaugeWidth, height: fillHeight).fill()
+            NSGraphicsContext.restoreGraphicsState()
         }
+        NSColor.white.withAlphaComponent(0.4).setStroke()
+        tank.lineWidth = 1
+        tank.stroke()
         output.unlockFocus()
         return output
     }
