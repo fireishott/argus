@@ -9,6 +9,11 @@ server:
 refresh:
   cache_seconds: 30
 
+# Set true only for the local macOS runtime. Provider credentials are then read
+# from the macOS Keychain, never from this config file or an environment file.
+local_first:
+  keychain_credentials: false
+
 sources:
   router:
     enabled: true

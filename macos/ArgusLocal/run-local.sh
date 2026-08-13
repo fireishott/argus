@@ -18,6 +18,8 @@ server:
   cors_origins: []
 refresh:
   cache_seconds: 30
+local_first:
+  keychain_credentials: true
 sources:
   router:
     enabled: false

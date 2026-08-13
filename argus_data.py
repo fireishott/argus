@@ -18,6 +18,8 @@ Sources (all verified 2026-08-12):
 import json
 import os
 import sqlite3
+import subprocess
+import sys
 import urllib.request
 import urllib.error
 import datetime as dt
@@ -34,6 +36,17 @@ DB_PATH = Path(str(settings.get("sources.usage_store.sqlite_path", ""))).expandu
 
 
 def _provider_credential(provider: str) -> str:
+    """Read a configured secret, preferring macOS Keychain in local-first mode."""
+    if sys.platform == "darwin" and bool(settings.get("local_first.keychain_credentials", False)):
+        try:
+            return subprocess.check_output(
+                ["/usr/bin/security", "find-generic-password", "-s", "Argus.Provider", "-a", provider, "-w"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+                timeout=3,
+            ).strip()
+        except (subprocess.SubprocessError, OSError):
+            return ""
     return settings.env_value(f"sources.providers.{provider}.credential_env")
 
 
@@ -72,7 +85,10 @@ def _configured_credentials():
 def _configured_provider_ids():
     """Local-first provider list, independent of any 9Router database."""
     providers = settings.get("sources.providers", {}) or {}
-    return [provider for provider, value in providers.items() if isinstance(value, dict) and value.get("enabled")]
+    return [
+        provider for provider, value in providers.items()
+        if isinstance(value, dict) and value.get("enabled") and _provider_credential(provider)
+    ]
 
 
 def _database_available() -> bool:
