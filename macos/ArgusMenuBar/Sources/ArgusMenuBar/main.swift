@@ -49,7 +49,7 @@ struct StatusBarProviders: View {
                 Image(systemName: "eye.slash")
             }
         }
-        .task { await store.start(refreshSeconds: preferences.refreshSeconds) }
+        .task { await store.start(refreshSeconds: preferences.refreshSeconds, preferences: preferences) }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Argus provider usage")
     }
@@ -824,7 +824,7 @@ final class ArgusStatusItems {
         button.title = target.statusText
         button.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
         button.toolTip = "\(target.label): \(target.valueText) - \(target.statusText)"
-        button.accessibilityLabel = button.toolTip
+        button.setAccessibilityLabel(button.toolTip)
     }
 
     private func statusColor(target: StatusTarget, preferences: ArgusPreferences) -> Color {
