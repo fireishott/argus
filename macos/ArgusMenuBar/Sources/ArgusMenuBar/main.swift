@@ -8,7 +8,7 @@ struct ArgusMenuBarApp: App {
 
     var body: some Scene {
         Settings {
-            ArgusSettingsView(preferences: appDelegate.preferences, statusTargets: appDelegate.store.statusTargets)
+            ArgusSettingsView(preferences: appDelegate.preferences, store: appDelegate.store)
         }
     }
 }
@@ -21,6 +21,7 @@ final class ArgusAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        settingsWindow.configure(store: store)
         store.configure(preferences: preferences, settingsWindow: settingsWindow)
         Task { await store.start(refreshSeconds: preferences.refreshSeconds, preferences: preferences) }
     }
@@ -270,14 +271,17 @@ struct ArgusPopover: View {
 @MainActor
 final class ArgusSettingsWindow: ObservableObject {
     private var controller: NSWindowController?
+    private weak var store: UsageStore?
 
-    func open(preferences: ArgusPreferences, targets: [StatusTarget]) {
+    func configure(store: UsageStore) { self.store = store }
+
+    func open(preferences: ArgusPreferences, targets: [StatusTarget] = []) {
         if let window = controller?.window {
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
-        let hosting = NSHostingController(rootView: ArgusSettingsView(preferences: preferences, statusTargets: targets))
+        let hosting = NSHostingController(rootView: ArgusSettingsView(preferences: preferences, store: store))
         let window = NSWindow(contentViewController: hosting)
         window.title = "Argus Settings"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
@@ -514,7 +518,8 @@ final class ArgusPreferences: ObservableObject {
 
 struct ArgusSettingsView: View {
     @ObservedObject var preferences: ArgusPreferences
-    let statusTargets: [StatusTarget]
+    @ObservedObject var store: UsageStore
+    private var statusTargets: [StatusTarget] { store.statusTargets }
     @State private var selectedTargetID: String?
     @State private var providerNames: [String: String] = [:]
 
