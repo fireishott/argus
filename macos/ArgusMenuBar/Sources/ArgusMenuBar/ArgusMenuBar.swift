@@ -1195,6 +1195,8 @@ final class ArgusStatusItems {
         if let remaining = target.remainingPercent {
             if remaining <= preferences.values.criticalThreshold { return .systemRed }
             if remaining <= preferences.values.warningThreshold { return .systemYellow }
+        } else if target.balance == nil {
+            return .systemRed
         }
         if target.status == "in_use" { return .systemGreen }
         return .white
@@ -1205,6 +1207,8 @@ final class ArgusStatusItems {
         if let remaining = target.remainingPercent {
             if remaining <= preferences.values.criticalThreshold { return .systemRed }
             if remaining <= preferences.values.warningThreshold { return .systemYellow }
+        } else if target.balance == nil {
+            return .systemRed
         }
         return .white
     }
@@ -1246,9 +1250,9 @@ final class ArgusStatusItems {
     private func statusValueText(for target: StatusTarget, preferences: ArgusPreferences) -> String {
         switch preferences.values.displayMode {
         case .balance:
-            return target.balance?.displayText ?? target.remainingPercent.map { "\($0)%" } ?? "n/a"
+            return target.balance?.displayText ?? target.remainingPercent.map { "\($0)%" } ?? "0%"
         case .remainingPercent:
-            return target.remainingPercent.map { "\($0)%" } ?? target.balance?.displayText ?? "n/a"
+            return target.remainingPercent.map { "\($0)%" } ?? target.balance?.displayText ?? "0%"
         case .usageBar, .fuelGauge, .iconOnly:
             return ""
         }
@@ -1435,7 +1439,7 @@ struct StatusTarget: Decodable, Identifiable {
     enum CodingKeys: String, CodingKey { case id, provider, kind, label, status, balance, remainingPercent = "remaining_percent" }
     var valueText: String {
         if let balance { return balance.displayText }
-        return remainingPercent.map { "\($0)%" } ?? "n/a"
+        return remainingPercent.map { "\($0)%" } ?? "0%"
     }
     var compactLabel: String {
         if kind == "balance" { return "Bal" }
@@ -1476,7 +1480,13 @@ struct ProviderUsage: Decodable, Identifiable {
     var quickPeek: String {
         let quota = windows.map { "\($0.label): \($0.remainingText)" }.joined(separator: " | ")
         let balancePart = balanceShortText.map { " | Balance: \($0)" } ?? ""
-        return "\(label) - \(status.capitalized)\(quota.isEmpty ? "" : " | \(quota)")\(balancePart)"
+        let detail: String
+        if quota.isEmpty && balancePart.isEmpty {
+            detail = " | 0% available"
+        } else {
+            detail = (quota.isEmpty ? "" : " | \(quota)") + balancePart
+        }
+        return "\(label) - \(status.capitalized)\(detail)"
     }
     var accessibilitySummary: String { "\(label), \(tooltip), \(status)" }
 }
@@ -1487,7 +1497,22 @@ struct UsageWindow: Decodable, Identifiable {
     let remainingPercent: Int?
     let resetAt: Date?
     var progress: Double { Double(remainingPercent ?? 0) / 100 }
-    var remainingText: String { remainingPercent.map { "\($0)% left" } ?? "n/a" }
+    var remainingText: String {
+        let base = remainingPercent.map { "\($0)% left" } ?? "0% left"
+        if let resetText { return "\(base) · \(resetText)" }
+        return base
+    }
+    var resetText: String? {
+        guard let resetAt else { return nil }
+        let seconds = Int(resetAt.timeIntervalSinceNow)
+        guard seconds > 0 else { return nil }
+        let days = seconds / 86400
+        let hours = (seconds % 86400) / 3600
+        let minutes = (seconds % 3600) / 60
+        if days > 0 { return hours > 0 ? "resets in \(days)d \(hours)h" : "resets in \(days)d" }
+        if hours > 0 { return minutes > 0 ? "resets in \(hours)h \(minutes)m" : "resets in \(hours)h" }
+        return "resets in \(max(1, minutes))m"
+    }
     enum CodingKeys: String, CodingKey { case id, label, remainingPercent = "remaining_percent", resetAt = "reset_at" }
 }
 
