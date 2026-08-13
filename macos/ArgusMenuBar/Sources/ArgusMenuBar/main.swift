@@ -744,7 +744,7 @@ struct StatusTarget: Decodable, Identifiable {
     let balance: Balance?
     enum CodingKeys: String, CodingKey { case id, provider, kind, label, balance, remainingPercent = "remaining_percent" }
     var valueText: String {
-        if let balance { return "\(balance.currency)\(String(format: \"%.2f\", balance.remaining))" }
+        if let balance { return "\(balance.currency)\(String(format: "%.2f", balance.remaining))" }
         return remainingPercent.map { "\($0)%" } ?? "n/a"
     }
 }
