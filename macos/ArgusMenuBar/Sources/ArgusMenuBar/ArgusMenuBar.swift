@@ -782,7 +782,7 @@ enum ProviderAuth: String { case apiKey, oauth
 }
 struct ProviderDefinition: Identifiable {
     let id: String; let label: String; let auth: ProviderAuth; let models: [String]; let placeholder: String; let oauthDetail: String
-    let oauth: OAuthConfig? = nil
+    var oauth: OAuthConfig? = nil
 }
 enum ProviderCatalog {
     static let entries: [ProviderDefinition] = [
