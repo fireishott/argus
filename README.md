@@ -52,15 +52,8 @@ Configure the endpoint in the app's Settings surface when it lands. The API bear
 
 Argus is prepared for Kallisti without coupling it to a local database or provider credential. The future native connector calls the same versioned snapshot endpoint, applies Kallisti-side auth and notification policy, and presents data in the app. Details: [docs/API.md](docs/API.md).
 
-## Public-readiness rules
-
-- The repo is private at creation time, but code must be publishable without a scrub pass.
-- `config/config.yaml`, `.env*`, credentials, databases, captures, and build output are ignored.
-- Do not add real network addresses, tokens, personal information, or provider account details to docs, tests, screenshots, issues, or commits.
-- Add a provider through a server adapter and `config.yaml`, never by baking a credential or local topology into the client.
-
 ## Status
 
-Foundation branch. The existing Argus dashboard is being migrated into this configuration-driven, client-safe layout before its public release.
+Active development. Argus is building toward a polished macOS menu-bar monitor, a web dashboard, and a future Kallisti integration.
 
-License intentionally deferred until the public release decision.
+License will be selected before public release.
