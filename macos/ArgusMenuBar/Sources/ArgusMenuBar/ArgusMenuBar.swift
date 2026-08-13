@@ -902,7 +902,8 @@ final class ArgusStatusItems {
             accessibilityDescription: target.label
         )?.withSymbolConfiguration(.init(pointSize: 12, weight: .semibold))
         image?.isTemplate = true
-        button.image = image?.tinted(with: NSColor(color))
+        button.image = image
+        button.contentTintColor = NSColor(color)
         button.imagePosition = .imageLeft
         button.title = target.valueText
         button.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
@@ -989,19 +990,6 @@ struct ProviderDetailView: View {
         }
         .padding(14)
         .frame(width: 310)
-    }
-}
-
-extension NSImage {
-    func tinted(with color: NSColor) -> NSImage {
-        let output = NSImage(size: size)
-        output.lockFocus()
-        color.set()
-        let rect = NSRect(origin: .zero, size: size)
-        rect.fill(using: .sourceAtop)
-        draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
-        output.unlockFocus()
-        return output
     }
 }
 
