@@ -884,7 +884,7 @@ private enum PKCE {
     }
 }
 
-final class LoopbackCallbackServer {
+final class LoopbackCallbackServer: @unchecked Sendable {
     private(set) var actualPort: UInt16 = 0
     private let fixedPort: UInt16
     private var socketFD: Int32 = -1
@@ -986,7 +986,7 @@ enum OAuthFlow {
         defer { server.stop() }
         let redirectURI = "http://localhost:\(server.actualPort)\(config.callbackPath)"
         let authorizeURL = buildAuthorizeURL(config, redirectURI: redirectURI, challenge: challenge, state: state)
-        await MainActor.run { NSWorkspace.shared.open(authorizeURL) }
+        await MainActor.run { _ = NSWorkspace.shared.open(authorizeURL) }
         let callbackURL = try await server.awaitCallback()
         guard let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false),
               let queryItems = components.queryItems,
