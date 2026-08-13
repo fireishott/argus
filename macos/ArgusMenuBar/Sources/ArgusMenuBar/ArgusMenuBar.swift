@@ -1,4 +1,6 @@
 import AppKit
+import CryptoKit
+import Darwin
 import Security
 import SwiftUI
 
@@ -715,11 +717,15 @@ struct ProviderConfigurationView: View {
                     }
                     Text("Saved only in this Mac's Keychain. Argus never displays it again.")
                         .font(.caption).foregroundStyle(.secondary)
+                } else if provider.oauth != nil {
+                    Text(provider.oauthDetail).foregroundStyle(.secondary)
+                    Button(isVerifying ? "Connecting..." : "Connect with \(provider.label)") { connectOAuth() }
+                        .disabled(isVerifying)
+                    Text("Opens your browser for a real \(provider.label) sign-in. The token is stored only in this Mac's Keychain.")
+                        .font(.caption).foregroundStyle(.secondary)
                 } else {
                     Text(provider.oauthDetail).foregroundStyle(.secondary)
-                    Button("Connect with \(provider.label)") { status = "OAuth setup for \(provider.label) is not available in this alpha yet." }
-                        .disabled(true)
-                    Text("Disabled until Argus implements this provider's documented callback exchange. No fake sign-in flow.")
+                    Text("This provider has no OAuth flow a third-party app can use.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 if !status.isEmpty { Text(status).font(.caption).foregroundStyle(status.hasPrefix("Connected") ? .green : .secondary) }
@@ -742,6 +748,33 @@ struct ProviderConfigurationView: View {
             }
         }
     }
+
+    private func connectOAuth() {
+        guard let config = provider.oauth else { return }
+        let id = provider.id
+        let label = provider.label
+        isVerifying = true
+        status = "Opening \(label) sign-in..."
+        Task {
+            do {
+                let tokens = try await OAuthFlow.connect(config)
+                let payload: [String: Any] = [
+                    "access_token": tokens.access,
+                    "refresh_token": tokens.refresh ?? "",
+                    "expires_in": tokens.expiresIn ?? 0,
+                    "created_at": Date().timeIntervalSince1970,
+                ]
+                let data = try JSONSerialization.data(withJSONObject: payload)
+                let json = String(data: data, encoding: .utf8) ?? ""
+                Keychain.save(service: "Argus.Provider", account: "\(id)-oauth", value: json)
+                isVerifying = false
+                status = "Connected. \(label) OAuth token saved to Keychain."
+            } catch {
+                isVerifying = false
+                status = "Could not connect to \(label): \(error.localizedDescription)"
+            }
+        }
+    }
 }
 
 enum ProviderAuth: String { case apiKey, oauth
@@ -749,6 +782,7 @@ enum ProviderAuth: String { case apiKey, oauth
 }
 struct ProviderDefinition: Identifiable {
     let id: String; let label: String; let auth: ProviderAuth; let models: [String]; let placeholder: String; let oauthDetail: String
+    let oauth: OAuthConfig? = nil
 }
 enum ProviderCatalog {
     static let entries: [ProviderDefinition] = [
@@ -756,10 +790,10 @@ enum ProviderCatalog {
         .init(id: "deepseek", label: "DeepSeek", auth: .apiKey, models: ["DeepSeek Chat", "DeepSeek Reasoner"], placeholder: "sk-...", oauthDetail: ""),
         .init(id: "minimax", label: "MiniMax", auth: .apiKey, models: ["MiniMax-M2.5", "MiniMax-M3"], placeholder: "sk-cp...", oauthDetail: ""),
         .init(id: "opencode-go", label: "OpenCode Go", auth: .apiKey, models: ["Go plan"], placeholder: "API key", oauthDetail: ""),
-        .init(id: "claude", label: "Claude", auth: .oauth, models: ["Claude Code plan"], placeholder: "", oauthDetail: "Claude quota uses an OAuth access token."),
-        .init(id: "codex", label: "Codex", auth: .oauth, models: ["Codex"], placeholder: "", oauthDetail: "Codex account usage requires an OAuth flow."),
-        .init(id: "gemini", label: "Gemini", auth: .oauth, models: ["Gemini 3.6", "Gemini 2.5"], placeholder: "", oauthDetail: "Gemini supports a documented desktop OAuth flow."),
-        .init(id: "mimo", label: "MiMo", auth: .oauth, models: ["MiMo V2.5"], placeholder: "", oauthDetail: "MiMo usage is behind an account session. Its connector is not ready yet."),
+        .init(id: "claude", label: "Claude", auth: .oauth, models: ["Claude Code plan"], placeholder: "", oauthDetail: "Claude Code plan usage via the official Claude OAuth flow.", oauth: OAuthConfig(authorizeURL: "https://claude.ai/oauth/authorize", tokenURL: "https://platform.claude.com/v1/oauth/token", clientID: "9d1c250a-e61b-44d9-88ed-5944d1962f5e", scopes: "user:profile user:inference user:sessions:claude_code user:mcp_servers", callbackPath: "/callback", fixedPort: 0, extraParams: [])),
+        .init(id: "codex", label: "Codex", auth: .oauth, models: ["Codex"], placeholder: "", oauthDetail: "ChatGPT/Codex sign-in via the official OpenAI OAuth flow.", oauth: OAuthConfig(authorizeURL: "https://auth.openai.com/oauth/authorize", tokenURL: "https://auth.openai.com/oauth/token", clientID: "app_EMoamEEZ73f0CkXaXp7hrann", scopes: "openid profile email offline_access api.connectors.read api.connectors.invoke", callbackPath: "/auth/callback", fixedPort: 1455, extraParams: [("id_token_add_organizations", "true"), ("codex_cli_simplified_flow", "true"), ("originator", "codex_cli_rs")])),
+        .init(id: "gemini", label: "Gemini", auth: .oauth, models: ["Gemini"], placeholder: "", oauthDetail: "Google blocked third-party Gemini subscription OAuth in Feb 2026. Use a Gemini API key (BYOK) instead."),
+        .init(id: "mimo", label: "MiMo", auth: .oauth, models: ["MiMo V2.5"], placeholder: "", oauthDetail: "MiMo usage sits behind an account session (cookie), not a standard OAuth flow."),
     ]
     static let byID = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0) })
 }
@@ -786,6 +820,232 @@ enum ProviderVerifier {
             guard (200...299).contains(http.statusCode) else { throw NSError(domain: "Argus.Provider", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: "Provider returned HTTP \(http.statusCode)."] ) }
             return .success("\(provider.label) verified.")
         } catch { return .failure(error) }
+    }
+}
+
+// MARK: - OAuth
+
+struct OAuthConfig {
+    let authorizeURL: String
+    let tokenURL: String
+    let clientID: String
+    let scopes: String
+    let callbackPath: String
+    let fixedPort: UInt16
+    let extraParams: [(String, String)]
+}
+
+struct OAuthTokens {
+    let access: String
+    let refresh: String?
+    let expiresIn: Int?
+}
+
+enum OAuthError: LocalizedError {
+    case serverBindFailed
+    case timedOut
+    case callbackInvalid
+    case tokenExchangeFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .serverBindFailed: return "Could not open a local loopback port for the sign-in callback."
+        case .timedOut: return "Sign-in timed out. Try again."
+        case .callbackInvalid: return "The sign-in callback was missing or invalid."
+        case .tokenExchangeFailed(let message): return "Token exchange failed: \(message)"
+        }
+    }
+}
+
+private enum PKCE {
+    static func generate() -> (verifier: String, challenge: String) {
+        let verifier = randomURLSafe(bytes: 32)
+        let challenge = sha256Base64URL(verifier)
+        return (verifier, challenge)
+    }
+
+    static func randomURLSafe(bytes: Int) -> String {
+        var buffer = [UInt8](repeating: 0, count: bytes)
+        if SecRandomCopyBytes(kSecRandomDefault, bytes, &buffer) != errSecSuccess {
+            for index in 0..<bytes { buffer[index] = UInt8(arc4random_uniform(256)) }
+        }
+        return Data(buffer).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
+    static func sha256Base64URL(_ string: String) -> String {
+        let digest = SHA256.hash(data: Data(string.utf8))
+        return Data(digest).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+}
+
+final class LoopbackCallbackServer {
+    private(set) var actualPort: UInt16 = 0
+    private let fixedPort: UInt16
+    private var socketFD: Int32 = -1
+    private var acceptThread: Thread?
+    private let stateQueue = DispatchQueue(label: "argus.oauth.loopback")
+    private var continuation: CheckedContinuation<URL, Error>?
+
+    init(fixedPort: UInt16) { self.fixedPort = fixedPort }
+
+    deinit { stop() }
+
+    func start() throws {
+        socketFD = socket(AF_INET, SOCK_STREAM, 0)
+        guard socketFD >= 0 else { throw OAuthError.serverBindFailed }
+        var reuse: Int32 = 1
+        setsockopt(socketFD, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = fixedPort.bigEndian
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let bindResult = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(socketFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard bindResult == 0 else { stop(); throw OAuthError.serverBindFailed }
+        guard listen(socketFD, 1) == 0 else { stop(); throw OAuthError.serverBindFailed }
+        var actual = sockaddr_in()
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        withUnsafeMutablePointer(to: &actual) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                _ = getsockname(socketFD, $0, &length)
+            }
+        }
+        actualPort = UInt16(bigEndian: actual.sin_port)
+    }
+
+    func awaitCallback(timeout: TimeInterval = 300) async throws -> URL {
+        try await withCheckedThrowingContinuation { continuation in
+            stateQueue.sync { self.continuation = continuation }
+            acceptThread = Thread { [weak self] in self?.acceptLoop() }
+            acceptThread?.name = "argus.oauth.loopback.accept"
+            acceptThread?.start()
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { [weak self] in
+                self?.finish(.failure(OAuthError.timedOut))
+            }
+        }
+    }
+
+    func stop() {
+        if socketFD >= 0 { close(socketFD); socketFD = -1 }
+    }
+
+    private func finish(_ result: Result<URL, Error>) {
+        stateQueue.sync {
+            guard let continuation else { return }
+            self.continuation = nil
+            continuation.resume(with: result)
+        }
+    }
+
+    private func acceptLoop() {
+        var clientAddress = sockaddr_in()
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let clientFD = withUnsafeMutablePointer(to: &clientAddress) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                accept(socketFD, $0, &length)
+            }
+        }
+        guard clientFD >= 0 else { finish(.failure(OAuthError.serverBindFailed)); return }
+        defer { close(clientFD) }
+        var buffer = [UInt8](repeating: 0, count: 8192)
+        let received = recv(clientFD, &buffer, buffer.count, 0)
+        guard received > 0 else { finish(.failure(OAuthError.callbackInvalid)); return }
+        let request = String(decoding: buffer[0..<Int(received)], as: UTF8.self)
+        let firstLine = request.components(separatedBy: "\r\n").first ?? request.components(separatedBy: "\n").first ?? ""
+        let parts = firstLine.split(separator: " ")
+        guard parts.count >= 2 else { finish(.failure(OAuthError.callbackInvalid)); return }
+        let path = String(parts[1])
+        guard let callbackURL = URL(string: "http://localhost\(path)") else { finish(.failure(OAuthError.callbackInvalid)); return }
+        let html = "<!doctype html><html><head><meta charset=\"utf-8\"><title>Argus</title></head><body style=\"font-family:-apple-system,system-ui;background:#1a1a1c;color:#e6e6e6;display:flex;align-items:center;justify-content:center;height:100vh;margin:0\"><div style=\"text-align:center\"><h2>Signed in to Argus</h2><p>You can close this window and return to the app.</p></div></body></html>"
+        let body = Array(html.utf8)
+        var response = Array("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n".utf8)
+        response.append(contentsOf: body)
+        response.withUnsafeBytes { pointer in
+            _ = send(clientFD, pointer.baseAddress, response.count, 0)
+        }
+        finish(.success(callbackURL))
+    }
+}
+
+enum OAuthFlow {
+    static func connect(_ config: OAuthConfig) async throws -> OAuthTokens {
+        let (verifier, challenge) = PKCE.generate()
+        let state = PKCE.randomURLSafe(bytes: 32)
+        let server = LoopbackCallbackServer(fixedPort: config.fixedPort)
+        try server.start()
+        defer { server.stop() }
+        let redirectURI = "http://localhost:\(server.actualPort)\(config.callbackPath)"
+        let authorizeURL = buildAuthorizeURL(config, redirectURI: redirectURI, challenge: challenge, state: state)
+        await MainActor.run { NSWorkspace.shared.open(authorizeURL) }
+        let callbackURL = try await server.awaitCallback()
+        guard let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false),
+              let queryItems = components.queryItems,
+              let stateValue = queryItems.first(where: { $0.name == "state" })?.value, stateValue == state,
+              let code = queryItems.first(where: { $0.name == "code" })?.value, !code.isEmpty else {
+            throw OAuthError.callbackInvalid
+        }
+        return try await exchange(config, code: code, redirectURI: redirectURI, verifier: verifier)
+    }
+
+    private static func buildAuthorizeURL(_ config: OAuthConfig, redirectURI: String, challenge: String, state: String) -> URL {
+        var components = URLComponents(string: config.authorizeURL)!
+        var items = [
+            URLQueryItem(name: "response_type", value: "code"),
+            URLQueryItem(name: "client_id", value: config.clientID),
+            URLQueryItem(name: "redirect_uri", value: redirectURI),
+            URLQueryItem(name: "scope", value: config.scopes),
+            URLQueryItem(name: "code_challenge", value: challenge),
+            URLQueryItem(name: "code_challenge_method", value: "S256"),
+            URLQueryItem(name: "state", value: state),
+        ]
+        for (key, value) in config.extraParams {
+            items.append(URLQueryItem(name: key, value: value))
+        }
+        components.queryItems = items
+        return components.url!
+    }
+
+    private static func exchange(_ config: OAuthConfig, code: String, redirectURI: String, verifier: String) async throws -> OAuthTokens {
+        var request = URLRequest(url: URL(string: config.tokenURL)!)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 30
+        let params: [(String, String)] = [
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("redirect_uri", redirectURI),
+            ("client_id", config.clientID),
+            ("code_verifier", verifier),
+        ]
+        let body = params.map { "\($0.0)=\(percentEncode($0.1))" }.joined(separator: "&")
+        request.httpBody = body.data(using: .utf8)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw OAuthError.tokenExchangeFailed("no HTTP response") }
+        guard (200...299).contains(http.statusCode) else {
+            let bodyString = String(data: data, encoding: .utf8) ?? ""
+            throw OAuthError.tokenExchangeFailed("HTTP \(http.statusCode): \(String(bodyString.prefix(200)))")
+        }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let access = json["access_token"] as? String else {
+            throw OAuthError.tokenExchangeFailed("no access_token in response")
+        }
+        return OAuthTokens(access: access, refresh: json["refresh_token"] as? String, expiresIn: json["expires_in"] as? Int)
+    }
+
+    private static func percentEncode(_ value: String) -> String {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 }
 
