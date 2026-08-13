@@ -48,6 +48,7 @@ def _balance(provider: str, balances: dict[str, Any]) -> dict[str, Any] | None:
 
 def snapshot(providers: list[dict[str, Any]], balances: dict[str, Any], dashboard_url: str = "") -> dict[str, Any]:
     public_providers: list[dict[str, Any]] = []
+    status_targets: list[dict[str, Any]] = []
     low_quota_count = 0
     for provider in providers:
         key = str(provider.get("provider") or "")
@@ -87,10 +88,40 @@ def snapshot(providers: list[dict[str, Any]], balances: dict[str, Any], dashboar
             item["balance"] = balance
         public_providers.append(item)
 
+        # Status-bar targets intentionally retain the source label. A provider
+        # may expose separate model buckets with the same 5h/7d category.
+        # The popover condenses those into one row; the status bar lets the user
+        # choose the exact bucket they care about.
+        aggregate = next((window.get("remaining_percent") for window in windows if window.get("id") == "5h"), None)
+        if aggregate is None and windows:
+            aggregate = windows[0].get("remaining_percent")
+        if aggregate is not None:
+            status_targets.append({
+                "id": f"provider:{key}", "provider": key, "kind": "provider",
+                "label": str(item["label"]), "remaining_percent": aggregate,
+            })
+        for label, window in (quota.get("quotas") or {}).items():
+            if not isinstance(window, dict):
+                continue
+            remaining = _remaining_percent(window)
+            if remaining is None:
+                continue
+            normalized = str(label).lower().replace(" ", "-").replace("/", "-").replace("(", "").replace(")", "")
+            status_targets.append({
+                "id": f"window:{key}:{normalized}", "provider": key, "kind": "window",
+                "label": f"{item['label']} - {label}", "remaining_percent": remaining,
+            })
+        if balance:
+            status_targets.append({
+                "id": f"balance:{key}", "provider": key, "kind": "balance",
+                "label": f"{item['label']} - balance", "balance": balance,
+            })
+
     return {
         "schema_version": 1,
         "generated_at": _utc_now(),
         "providers": public_providers,
+        "status_targets": status_targets,
         "summary": {"provider_count": len(public_providers), "low_quota_count": low_quota_count},
         "links": {"dashboard_url": dashboard_url or None},
     }

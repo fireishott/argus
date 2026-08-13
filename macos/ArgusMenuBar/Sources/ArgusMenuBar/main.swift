@@ -17,7 +17,7 @@ struct ArgusMenuBarApp: App {
         .menuBarExtraStyle(.window)
 
         Settings {
-            ArgusSettingsView(preferences: preferences)
+            ArgusSettingsView(preferences: preferences, statusTargets: store.statusTargets)
         }
     }
 }
@@ -30,10 +30,10 @@ struct StatusBarProviders: View {
 
     var body: some View {
         HStack(spacing: 7) {
-            ForEach(preferences.orderedEnabledProviders(from: store.providers)) { provider in
-                ProviderStatusChip(provider: provider, preferences: preferences)
+            ForEach(preferences.orderedEnabledTargets(from: store.statusTargets)) { target in
+                StatusTargetChip(target: target, preferences: preferences)
             }
-            if preferences.orderedEnabledProviders(from: store.providers).isEmpty {
+            if preferences.orderedEnabledTargets(from: store.statusTargets).isEmpty {
                 Image(systemName: "eye.slash")
             }
         }
@@ -43,32 +43,57 @@ struct StatusBarProviders: View {
     }
 }
 
-struct ProviderStatusChip: View {
-    let provider: ProviderUsage
+struct StatusTargetChip: View {
+    let target: StatusTarget
     @ObservedObject var preferences: ArgusPreferences
 
     var body: some View {
-        let color = preferences.color(for: provider.remainingPercent)
-        Group {
+        let color = preferences.color(for: target.remainingPercent)
+        HStack(spacing: 3) {
+            TargetMark(provider: target.provider, iconMode: preferences.iconMode).foregroundStyle(color)
             switch preferences.displayMode {
             case .usageBar:
-                HStack(spacing: 3) {
-                    ProviderMark(provider: provider, mode: preferences.iconMode).foregroundStyle(color)
-                    UsageBar(remainingPercent: provider.remainingPercent, preferences: preferences)
-                }
+                UsageBar(remainingPercent: target.remainingPercent, preferences: preferences)
             case .fuelGauge:
-                FuelGauge(provider: provider, preferences: preferences)
+                TargetFuelGauge(target: target, preferences: preferences)
+            case .iconOnly:
+                EmptyView()
             default:
-                HStack(spacing: 3) {
-                    ProviderMark(provider: provider, mode: preferences.iconMode).foregroundStyle(color)
-                    if preferences.displayMode != .iconOnly {
-                        Text(preferences.valueText(for: provider)).monospacedDigit().foregroundStyle(color)
-                    }
-                }
+                Text(target.valueText).monospacedDigit().foregroundStyle(color)
             }
         }
-        .help(provider.tooltip)
-        .accessibilityLabel(provider.accessibilitySummary)
+        .help(target.label + ": " + target.valueText)
+        .accessibilityLabel(target.label + ", " + target.valueText)
+    }
+}
+
+struct TargetMark: View {
+    let provider: String
+    let iconMode: IconMode
+    var body: some View {
+        switch iconMode {
+        case .brandMark: Image(systemName: symbol).frame(width: 14, height: 14)
+        case .monogram: Text(String(provider.prefix(2)).uppercased()).font(.system(size: 10, weight: .bold, design: .rounded)).frame(minWidth: 14)
+        case .systemSymbol: Image(systemName: symbol).font(.system(size: 12, weight: .semibold))
+        }
+    }
+    private var symbol: String {
+        switch provider {
+        case "claude": "sparkle"; case "deepseek": "wave.3.right"; case "minimax": "bolt"; case "openrouter": "arrow.triangle.branch"; case "opencode-go": "chevron.left.forwardslash.chevron.right"; default: "cpu"
+        }
+    }
+}
+
+struct TargetFuelGauge: View {
+    let target: StatusTarget
+    @ObservedObject var preferences: ArgusPreferences
+    var body: some View {
+        let used = Double(100 - (target.remainingPercent ?? 0)) / 100
+        ZStack {
+            RoundedRectangle(cornerRadius: 5).fill(.quaternary)
+            GeometryReader { proxy in RoundedRectangle(cornerRadius: 5).fill(preferences.usageGradient).frame(width: proxy.size.width * used) }.clipShape(RoundedRectangle(cornerRadius: 5))
+            TargetMark(provider: target.provider, iconMode: preferences.iconMode).font(.system(size: 9, weight: .bold)).foregroundStyle(.primary)
+        }.frame(width: 24, height: 15)
     }
 }
 
@@ -203,7 +228,7 @@ struct ArgusPopover: View {
                     Image(systemName: "arrow.clockwise")
                 }
                 .buttonStyle(.plain)
-                Button { settingsWindow.open(preferences: preferences) } label: {
+                Button { settingsWindow.open(preferences: preferences, targets: store.statusTargets) } label: {
                     Image(systemName: "gearshape")
                 }
                 .buttonStyle(.plain)
@@ -223,7 +248,7 @@ struct ArgusPopover: View {
 
             Divider()
             HStack {
-                Button("Settings") { settingsWindow.open(preferences: preferences) }
+                Button("Settings") { settingsWindow.open(preferences: preferences, targets: store.statusTargets) }
                 Spacer()
                 Button("Open Dashboard") { store.openDashboard() }
                     .disabled(store.dashboardURL == nil)
@@ -238,13 +263,13 @@ struct ArgusPopover: View {
 final class ArgusSettingsWindow: ObservableObject {
     private var controller: NSWindowController?
 
-    func open(preferences: ArgusPreferences) {
+    func open(preferences: ArgusPreferences, targets: [StatusTarget]) {
         if let window = controller?.window {
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
-        let hosting = NSHostingController(rootView: ArgusSettingsView(preferences: preferences))
+        let hosting = NSHostingController(rootView: ArgusSettingsView(preferences: preferences, statusTargets: targets))
         let window = NSWindow(contentViewController: hosting)
         window.title = "Argus Settings"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
@@ -287,9 +312,6 @@ struct ProviderRow: View {
                 }
                 .font(.caption)
             }
-            if let balance = provider.balanceText {
-                Text(balance).font(.caption).foregroundStyle(.secondary)
-            }
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
@@ -330,6 +352,11 @@ struct ProviderPreference: Codable, Identifiable {
     var enabled: Bool
 }
 
+struct StatusTargetPreference: Codable, Identifiable {
+    let id: String
+    var enabled: Bool
+}
+
 struct PersistedPreferences: Codable {
     var iconMode: IconMode = .brandMark
     var displayMode: DisplayMode = .remainingPercent
@@ -341,6 +368,7 @@ struct PersistedPreferences: Codable {
     var criticalColor: StoredColor = .red
     var unavailableColor: StoredColor = .white
     var providerOrder: [ProviderPreference] = []
+    var statusTargetOrder: [StatusTargetPreference] = []
 }
 
 enum StoredColor: String, Codable, CaseIterable, Identifiable {
@@ -371,6 +399,8 @@ final class ArgusPreferences: ObservableObject {
         } else {
             values = PersistedPreferences()
         }
+        // Old alpha builds stored only provider-level menu items. Keep those
+        // defaults, but let new provider/window targets populate on refresh.
     }
 
     var iconMode: IconMode { values.iconMode }
@@ -391,11 +421,30 @@ final class ArgusPreferences: ObservableObject {
             .sorted { indexes[$0.provider, default: .max] < indexes[$1.provider, default: .max] }
     }
 
+    func orderedEnabledTargets(from targets: [StatusTarget]) -> [StatusTarget] {
+        syncTargets(targets)
+        let indexes = Dictionary(uniqueKeysWithValues: values.statusTargetOrder.enumerated().map { ($0.element.id, $0.offset) })
+        let enabled = Set(values.statusTargetOrder.filter(\.enabled).map(\.id))
+        return targets.filter { enabled.contains($0.id) }
+            .sorted { indexes[$0.id, default: .max] < indexes[$1.id, default: .max] }
+    }
+
     func sync(_ providers: [ProviderUsage]) {
         let known = Set(values.providerOrder.map(\.id))
         let additions = providers.filter { !known.contains($0.provider) }.map { ProviderPreference(id: $0.provider, enabled: true) }
         guard !additions.isEmpty else { return }
         values.providerOrder.append(contentsOf: additions)
+        save()
+    }
+
+    func syncTargets(_ targets: [StatusTarget]) {
+        let known = Set(values.statusTargetOrder.map(\.id))
+        let additions = targets.filter { !known.contains($0.id) }.map { target in
+            // Preserve the old default: provider-level chips start enabled.
+            StatusTargetPreference(id: target.id, enabled: target.kind == "provider")
+        }
+        guard !additions.isEmpty else { return }
+        values.statusTargetOrder.append(contentsOf: additions)
         save()
     }
 
@@ -437,6 +486,7 @@ final class ArgusPreferences: ObservableObject {
 
 struct ArgusSettingsView: View {
     @ObservedObject var preferences: ArgusPreferences
+    let statusTargets: [StatusTarget]
     @State private var providerNames: [String: String] = [:]
 
     var body: some View {
@@ -466,13 +516,22 @@ struct ArgusSettingsView: View {
                 Stepper("Warning at \(preferences.values.warningThreshold)% or below", value: binding(\.warningThreshold), in: 1...99)
                 Stepper("Critical at \(preferences.values.criticalThreshold)% or below", value: binding(\.criticalThreshold), in: 0...preferences.values.warningThreshold)
             }
-            Section("Providers in menu bar") {
-                Text("Toggle providers on or off, then drag to set their menu-bar order.").font(.caption).foregroundStyle(.secondary)
+            Section("Status bar layout") {
+                Text("Pin a provider, a specific quota window, or a balance. Drag rows to set the left-to-right order in the menu bar.")
+                    .font(.caption).foregroundStyle(.secondary)
                 List {
-                    ForEach(preferences.values.providerOrder) { item in
-                        Toggle(isOn: providerEnabledBinding(item.id)) { Text(providerNames[item.id] ?? item.id) }
-                    }.onMove(perform: moveProviders)
-                }.frame(minHeight: 160)
+                    ForEach(orderedTargets) { target in
+                        Toggle(isOn: targetEnabledBinding(target.id)) {
+                            HStack(spacing: 7) {
+                                TargetMark(provider: target.provider, iconMode: preferences.iconMode)
+                                    .foregroundStyle(preferences.color(for: target.remainingPercent))
+                                Text(target.label)
+                                Spacer()
+                                Text(target.valueText).monospacedDigit().foregroundStyle(.secondary)
+                            }
+                        }
+                    }.onMove(perform: moveTargets)
+                }.frame(minHeight: 245)
             }
         }.formStyle(.grouped)
     }
@@ -480,12 +539,20 @@ struct ArgusSettingsView: View {
     private func binding<T>(_ keyPath: WritableKeyPath<PersistedPreferences, T>) -> Binding<T> {
         Binding(get: { preferences.values[keyPath: keyPath] }, set: { value in preferences.update { $0[keyPath: keyPath] = value } })
     }
-    private func providerEnabledBinding(_ id: String) -> Binding<Bool> {
-        Binding(get: { preferences.values.providerOrder.first(where: { $0.id == id })?.enabled ?? false }, set: { enabled in preferences.update { values in
-            guard let index = values.providerOrder.firstIndex(where: { $0.id == id }) else { return }; values.providerOrder[index].enabled = enabled
+    private var orderedTargets: [StatusTarget] {
+        preferences.syncTargets(statusTargets)
+        let positions = Dictionary(uniqueKeysWithValues: preferences.values.statusTargetOrder.enumerated().map { ($0.element.id, $0.offset) })
+        return statusTargets.sorted { positions[$0.id, default: .max] < positions[$1.id, default: .max] }
+    }
+    private func targetEnabledBinding(_ id: String) -> Binding<Bool> {
+        Binding(get: { preferences.values.statusTargetOrder.first(where: { $0.id == id })?.enabled ?? false }, set: { enabled in preferences.update { values in
+            guard let index = values.statusTargetOrder.firstIndex(where: { $0.id == id }) else { return }
+            values.statusTargetOrder[index].enabled = enabled
         } })
     }
-    private func moveProviders(from offsets: IndexSet, to destination: Int) { preferences.update { $0.providerOrder.move(fromOffsets: offsets, toOffset: destination) } }
+    private func moveTargets(from offsets: IndexSet, to destination: Int) {
+        preferences.update { $0.statusTargetOrder.move(fromOffsets: offsets, toOffset: destination) }
+    }
 }
 
 struct ProviderConfigurationView: View {
@@ -607,6 +674,7 @@ enum ProviderVerifier {
 @MainActor
 final class UsageStore: ObservableObject {
     @Published var providers: [ProviderUsage] = []
+    @Published var statusTargets: [StatusTarget] = []
     @Published var error: String?
     @Published var dashboardURL: URL?
     @Published var lastUpdatedText = "Not updated"
@@ -630,6 +698,7 @@ final class UsageStore: ObservableObject {
         do {
             let payload = try await client.snapshot()
             providers = payload.providers
+            statusTargets = payload.statusTargets
             dashboardURL = payload.links.dashboardURL
             lastUpdatedText = "Updated now"
             error = nil
@@ -660,9 +729,24 @@ struct ArgusClient {
 struct SnapshotPayload: Decodable {
     let schemaVersion: Int
     let providers: [ProviderUsage]
+    let statusTargets: [StatusTarget]
     let links: Links
-    enum CodingKeys: String, CodingKey { case schemaVersion = "schema_version", providers, links }
+    enum CodingKeys: String, CodingKey { case schemaVersion = "schema_version", providers, statusTargets = "status_targets", links }
     struct Links: Decodable { let dashboardURL: URL?; enum CodingKeys: String, CodingKey { case dashboardURL = "dashboard_url" } }
+}
+
+struct StatusTarget: Decodable, Identifiable {
+    let id: String
+    let provider: String
+    let kind: String
+    let label: String
+    let remainingPercent: Int?
+    let balance: Balance?
+    enum CodingKeys: String, CodingKey { case id, provider, kind, label, balance, remainingPercent = "remaining_percent" }
+    var valueText: String {
+        if let balance { return "\(balance.currency)\(String(format: \"%.2f\", balance.remaining))" }
+        return remainingPercent.map { "\($0)%" } ?? "n/a"
+    }
 }
 
 struct ProviderUsage: Decodable, Identifiable {
