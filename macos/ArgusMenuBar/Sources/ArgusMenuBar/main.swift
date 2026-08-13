@@ -48,17 +48,70 @@ struct ProviderStatusChip: View {
 
     var body: some View {
         let color = preferences.color(for: provider.remainingPercent)
-        HStack(spacing: 3) {
-            ProviderMark(provider: provider, mode: preferences.iconMode)
-                .foregroundStyle(color)
-            if preferences.displayMode != .iconOnly {
-                Text(preferences.valueText(for: provider))
-                    .monospacedDigit()
-                    .foregroundStyle(color)
+        Group {
+            switch preferences.displayMode {
+            case .usageBar:
+                HStack(spacing: 3) {
+                    ProviderMark(provider: provider, mode: preferences.iconMode).foregroundStyle(color)
+                    UsageBar(remainingPercent: provider.remainingPercent, preferences: preferences)
+                }
+            case .fuelGauge:
+                FuelGauge(provider: provider, preferences: preferences)
+            default:
+                HStack(spacing: 3) {
+                    ProviderMark(provider: provider, mode: preferences.iconMode).foregroundStyle(color)
+                    if preferences.displayMode != .iconOnly {
+                        Text(preferences.valueText(for: provider)).monospacedDigit().foregroundStyle(color)
+                    }
+                }
             }
         }
         .help(provider.tooltip)
         .accessibilityLabel(provider.accessibilitySummary)
+    }
+}
+
+struct UsageBar: View {
+    let remainingPercent: Int?
+    @ObservedObject var preferences: ArgusPreferences
+
+    var body: some View {
+        let used = Double(100 - (remainingPercent ?? 0)) / 100
+        Capsule()
+            .fill(.quaternary)
+            .overlay(alignment: .leading) {
+                GeometryReader { proxy in
+                    Capsule()
+                        .fill(preferences.usageGradient)
+                        .frame(width: max(2, proxy.size.width * used))
+                }
+                .clipShape(Capsule())
+            }
+            .frame(width: 30, height: 7)
+            .accessibilityLabel("\(Int(used * 100)) percent used")
+    }
+}
+
+struct FuelGauge: View {
+    let provider: ProviderUsage
+    @ObservedObject var preferences: ArgusPreferences
+
+    var body: some View {
+        let used = Double(100 - (provider.remainingPercent ?? 0)) / 100
+        ZStack {
+            RoundedRectangle(cornerRadius: 5, style: .continuous).fill(.quaternary)
+            GeometryReader { proxy in
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(preferences.usageGradient)
+                    .frame(width: proxy.size.width * used)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+            ProviderMark(provider: provider, mode: preferences.iconMode)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.primary)
+        }
+        .frame(width: 24, height: 15)
+        .accessibilityLabel("\(provider.label), \(Int(used * 100)) percent used")
     }
 }
 
@@ -210,12 +263,14 @@ enum IconMode: String, Codable, CaseIterable, Identifiable {
 }
 
 enum DisplayMode: String, Codable, CaseIterable, Identifiable {
-    case remainingPercent, balance, iconOnly
+    case remainingPercent, balance, usageBar, fuelGauge, iconOnly
     var id: String { rawValue }
     var label: String {
         switch self {
         case .remainingPercent: "Remaining %"
         case .balance: "Balance when available"
+        case .usageBar: "Usage bar"
+        case .fuelGauge: "Fuel gauge"
         case .iconOnly: "Icon only"
         }
     }
@@ -302,11 +357,25 @@ final class ArgusPreferences: ObservableObject {
         return values.healthyColor.color
     }
 
+    // Gradient describes consumption, not remaining balance: green at a new
+    // window, yellow near warning, red when the bucket is exhausted.
+    var usageGradient: LinearGradient {
+        LinearGradient(
+            stops: [
+                .init(color: values.healthyColor.color, location: 0),
+                .init(color: values.warningColor.color, location: Double(100 - values.warningThreshold) / 100),
+                .init(color: values.criticalColor.color, location: 1),
+            ],
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+    }
+
     func valueText(for provider: ProviderUsage) -> String {
         switch values.displayMode {
         case .remainingPercent: provider.remainingPercent.map { "\($0)%" } ?? "n/a"
         case .balance: provider.balanceShortText ?? provider.remainingPercent.map { "\($0)%" } ?? "n/a"
-        case .iconOnly: ""
+        case .usageBar, .fuelGauge, .iconOnly: ""
         }
     }
 
