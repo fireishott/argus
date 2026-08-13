@@ -1034,7 +1034,7 @@ struct StatusTarget: Decodable, Identifiable {
     let balance: Balance?
     enum CodingKeys: String, CodingKey { case id, provider, kind, label, status, balance, remainingPercent = "remaining_percent" }
     var valueText: String {
-        if let balance { return "\(balance.currency)\(String(format: "%.2f", balance.remaining))" }
+        if let balance { return balance.displayText }
         return remainingPercent.map { "\($0)%" } ?? "n/a"
     }
     var compactLabel: String {
@@ -1068,8 +1068,8 @@ struct ProviderUsage: Decodable, Identifiable {
     let balance: Balance?
     var id: String { provider }
     var remainingPercent: Int? { windows.first(where: { $0.id == "5h" })?.remainingPercent ?? windows.first?.remainingPercent }
-    var balanceText: String? { balance.map { "Balance: \($0.currency) \(String(format: "%.2f", $0.remaining))" } }
-    var balanceShortText: String? { balance.map { "\($0.currency)\(String(format: "%.2f", $0.remaining))" } }
+    var balanceText: String? { balance.map { "Balance: \($0.displayText)" } }
+    var balanceShortText: String? { balance.map(\.displayText) }
     var monogram: String { label.split(separator: " ").prefix(2).map { String($0.prefix(1)) }.joined().uppercased() }
     var symbolName: String { "cpu" }
     var tooltip: String { "\(label): \(windows.map { "\($0.label) \($0.remainingText)" }.joined(separator: ", "))" }
@@ -1091,7 +1091,15 @@ struct UsageWindow: Decodable, Identifiable {
     enum CodingKeys: String, CodingKey { case id, label, remainingPercent = "remaining_percent", resetAt = "reset_at" }
 }
 
-struct Balance: Decodable { let kind: String; let remaining: Double; let currency: String }
+struct Balance: Decodable {
+    let kind: String
+    let remaining: Double
+    let currency: String
+    var displayText: String {
+        let symbol = currency.uppercased() == "USD" ? "$" : "\(currency) "
+        return "\(symbol)\(String(format: "%.2f", remaining))"
+    }
+}
 
 enum Keychain {
     static func read(service: String, account: String) -> String? {
