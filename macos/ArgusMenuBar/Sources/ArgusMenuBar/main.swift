@@ -604,7 +604,7 @@ struct ArgusSettingsView: View {
     @ViewBuilder private func targetRow(_ target: StatusTarget) -> some View {
         HStack(spacing: 7) {
             TargetMark(provider: target.provider, iconMode: preferences.iconMode).foregroundStyle(preferences.color(for: target.remainingPercent))
-            Text(target.label).lineLimit(1)
+            Text(target.shortLabel).lineLimit(1)
             Spacer()
             Text(target.valueText).monospacedDigit().foregroundStyle(.secondary)
         }
@@ -821,9 +821,9 @@ final class ArgusStatusItems {
         image?.isTemplate = false
         button.image = image?.tinted(with: NSColor(color))
         button.imagePosition = .imageLeft
-        button.title = target.statusText
+        button.title = target.valueText
         button.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
-        button.toolTip = "\(target.label): \(target.valueText) - \(target.statusText)"
+        button.toolTip = "\(target.shortLabel): \(target.valueText) - \(target.statusText)"
         button.setAccessibilityLabel(button.toolTip)
     }
 
