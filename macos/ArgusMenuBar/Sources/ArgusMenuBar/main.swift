@@ -391,22 +391,24 @@ struct ArgusSettingsView: View {
     @State private var providerNames: [String: String] = [:]
 
     var body: some View {
+        TabView {
+            displayTab.tabItem { Label("Display", systemImage: "menubar.rectangle") }
+            ProviderConfigurationView()
+                .tabItem { Label("Configuration", systemImage: "key.horizontal") }
+        }
+        .padding()
+        .frame(width: 560, height: 620)
+    }
+
+    private var displayTab: some View {
         Form {
             Section("Menu bar") {
-                Picker("Provider mark", selection: binding(\.iconMode)) {
-                    ForEach(IconMode.allCases) { Text($0.label).tag($0) }
-                }
-                Picker("Value next to mark", selection: binding(\.displayMode)) {
-                    ForEach(DisplayMode.allCases) { Text($0.label).tag($0) }
-                }
+                Picker("Provider mark", selection: binding(\.iconMode)) { ForEach(IconMode.allCases) { Text($0.label).tag($0) } }
+                Picker("Value next to mark", selection: binding(\.displayMode)) { ForEach(DisplayMode.allCases) { Text($0.label).tag($0) } }
                 Picker("Refresh", selection: binding(\.refreshSeconds)) {
-                    Text("30 seconds").tag(30)
-                    Text("60 seconds").tag(60)
-                    Text("2 minutes").tag(120)
-                    Text("5 minutes").tag(300)
+                    Text("30 seconds").tag(30); Text("60 seconds").tag(60); Text("2 minutes").tag(120); Text("5 minutes").tag(300)
                 }
             }
-
             Section("Colors by remaining usage") {
                 Picker("Healthy", selection: binding(\.healthyColor)) { ForEach(StoredColor.allCases) { Text($0.label).tag($0) } }
                 Picker("Warning", selection: binding(\.warningColor)) { ForEach(StoredColor.allCases) { Text($0.label).tag($0) } }
@@ -415,45 +417,139 @@ struct ArgusSettingsView: View {
                 Stepper("Warning at \(preferences.values.warningThreshold)% or below", value: binding(\.warningThreshold), in: 1...99)
                 Stepper("Critical at \(preferences.values.criticalThreshold)% or below", value: binding(\.criticalThreshold), in: 0...preferences.values.warningThreshold)
             }
-
             Section("Providers in menu bar") {
-                Text("Toggle providers on or off, then drag to set their menu-bar order.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text("Toggle providers on or off, then drag to set their menu-bar order.").font(.caption).foregroundStyle(.secondary)
                 List {
                     ForEach(preferences.values.providerOrder) { item in
-                        HStack {
-                            Toggle(isOn: providerEnabledBinding(item.id)) {
-                                Text(providerNames[item.id] ?? item.id)
-                            }
-                        }
-                    }
-                    .onMove(perform: moveProviders)
-                }
-                .frame(minHeight: 160)
+                        Toggle(isOn: providerEnabledBinding(item.id)) { Text(providerNames[item.id] ?? item.id) }
+                    }.onMove(perform: moveProviders)
+                }.frame(minHeight: 160)
             }
-        }
-        .formStyle(.grouped)
-        .padding()
-        .frame(width: 510, height: 590)
+        }.formStyle(.grouped)
     }
 
     private func binding<T>(_ keyPath: WritableKeyPath<PersistedPreferences, T>) -> Binding<T> {
         Binding(get: { preferences.values[keyPath: keyPath] }, set: { value in preferences.update { $0[keyPath: keyPath] = value } })
     }
-
     private func providerEnabledBinding(_ id: String) -> Binding<Bool> {
-        Binding(
-            get: { preferences.values.providerOrder.first(where: { $0.id == id })?.enabled ?? false },
-            set: { enabled in preferences.update { values in
-                guard let index = values.providerOrder.firstIndex(where: { $0.id == id }) else { return }
-                values.providerOrder[index].enabled = enabled
-            } }
-        )
+        Binding(get: { preferences.values.providerOrder.first(where: { $0.id == id })?.enabled ?? false }, set: { enabled in preferences.update { values in
+            guard let index = values.providerOrder.firstIndex(where: { $0.id == id }) else { return }; values.providerOrder[index].enabled = enabled
+        } })
+    }
+    private func moveProviders(from offsets: IndexSet, to destination: Int) { preferences.update { $0.providerOrder.move(fromOffsets: offsets, toOffset: destination) } }
+}
+
+struct ProviderConfigurationView: View {
+    @State private var selectedID = ProviderCatalog.entries.first!.id
+    @State private var credential = ""
+    @State private var status = ""
+    @State private var isVerifying = false
+
+    private var provider: ProviderDefinition { ProviderCatalog.byID[selectedID] ?? ProviderCatalog.entries[0] }
+
+    var body: some View {
+        Form {
+            Section("Add or update provider") {
+                Picker("Provider", selection: $selectedID) {
+                    ForEach(ProviderCatalog.entries) { item in
+                        Text(item.label).tag(item.id)
+                    }
+                }
+                .onChange(of: selectedID) { _, _ in loadStoredCredential() }
+
+                LabeledContent("Authentication", value: provider.auth.label)
+                if !provider.models.isEmpty {
+                    LabeledContent("Models", value: provider.models.joined(separator: ", "))
+                        .lineLimit(2)
+                }
+            }
+
+            Section(provider.auth == .apiKey ? "API key" : "OAuth") {
+                if provider.auth == .apiKey {
+                    SecureField(provider.placeholder, text: $credential)
+                        .textFieldStyle(.roundedBorder)
+                    HStack {
+                        Button(isVerifying ? "Verifying..." : "Verify and Save") { verifyAndSave() }
+                            .disabled(credential.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isVerifying)
+                        if Keychain.read(service: "Argus.Provider", account: provider.id) != nil {
+                            Button("Remove", role: .destructive) { Keychain.remove(service: "Argus.Provider", account: provider.id); credential = ""; status = "Removed from this Mac." }
+                        }
+                    }
+                    Text("Saved only in this Mac's Keychain. Argus never displays it again.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text(provider.oauthDetail).foregroundStyle(.secondary)
+                    Button("Connect with \(provider.label)") { status = "OAuth setup for \(provider.label) is not available in this alpha yet." }
+                        .disabled(true)
+                    Text("Disabled until Argus implements this provider's documented callback exchange. No fake sign-in flow.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if !status.isEmpty { Text(status).font(.caption).foregroundStyle(status.hasPrefix("Connected") ? .green : .secondary) }
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear(perform: loadStoredCredential)
     }
 
-    private func moveProviders(from offsets: IndexSet, to destination: Int) {
-        preferences.update { $0.providerOrder.move(fromOffsets: offsets, toOffset: destination) }
+    private func loadStoredCredential() { credential = Keychain.read(service: "Argus.Provider", account: provider.id) ?? ""; status = "" }
+    private func verifyAndSave() {
+        let value = credential.trimmingCharacters(in: .whitespacesAndNewlines)
+        isVerifying = true; status = "Verifying \(provider.label)..."
+        Task {
+            let result = await ProviderVerifier.verify(provider, credential: value)
+            isVerifying = false
+            switch result {
+            case .success(let message):
+                Keychain.save(service: "Argus.Provider", account: provider.id, value: value)
+                status = "Connected. \(message)"
+            case .failure(let error): status = "Could not verify: \(error.localizedDescription)"
+            }
+        }
+    }
+}
+
+enum ProviderAuth: String { case apiKey, oauth
+    var label: String { self == .apiKey ? "API key" : "OAuth" }
+}
+struct ProviderDefinition: Identifiable {
+    let id: String; let label: String; let auth: ProviderAuth; let models: [String]; let placeholder: String; let oauthDetail: String
+}
+enum ProviderCatalog {
+    static let entries: [ProviderDefinition] = [
+        .init(id: "openrouter", label: "OpenRouter", auth: .apiKey, models: ["All routed models"], placeholder: "sk-or-...", oauthDetail: ""),
+        .init(id: "deepseek", label: "DeepSeek", auth: .apiKey, models: ["DeepSeek Chat", "DeepSeek Reasoner"], placeholder: "sk-...", oauthDetail: ""),
+        .init(id: "minimax", label: "MiniMax", auth: .apiKey, models: ["MiniMax-M2.5", "MiniMax-M3"], placeholder: "sk-cp...", oauthDetail: ""),
+        .init(id: "opencode-go", label: "OpenCode Go", auth: .apiKey, models: ["Go plan"], placeholder: "API key", oauthDetail: ""),
+        .init(id: "claude", label: "Claude", auth: .oauth, models: ["Claude Code plan"], placeholder: "", oauthDetail: "Claude quota uses an OAuth access token."),
+        .init(id: "codex", label: "Codex", auth: .oauth, models: ["Codex"], placeholder: "", oauthDetail: "Codex account usage requires an OAuth flow."),
+        .init(id: "gemini", label: "Gemini", auth: .oauth, models: ["Gemini 3.6", "Gemini 2.5"], placeholder: "", oauthDetail: "Gemini supports a documented desktop OAuth flow."),
+        .init(id: "mimo", label: "MiMo", auth: .oauth, models: ["MiMo V2.5"], placeholder: "", oauthDetail: "MiMo usage is behind an account session. Its connector is not ready yet."),
+    ]
+    static let byID = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0) })
+}
+
+enum ProviderVerifier {
+    static func verify(_ provider: ProviderDefinition, credential: String) async -> Result<String, Error> {
+        do {
+            let url: URL
+            var request: URLRequest
+            switch provider.id {
+            case "openrouter":
+                url = URL(string: "https://openrouter.ai/api/v1/auth/key")!; request = URLRequest(url: url); request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+            case "deepseek":
+                url = URL(string: "https://api.deepseek.com/user/balance")!; request = URLRequest(url: url); request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+            case "minimax":
+                url = URL(string: "https://www.minimax.io/v1/token_plan/remains")!; request = URLRequest(url: url); request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+            case "opencode-go":
+                url = URL(string: "https://opencode.ai/zen/go/v1/usage")!; request = URLRequest(url: url); request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+            default: throw URLError(.unsupportedURL)
+            }
+            request.timeoutInterval = 15
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+            guard (200...299).contains(http.statusCode) else { throw NSError(domain: "Argus.Provider", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: "Provider returned HTTP \(http.statusCode)."] ) }
+            return .success("\(provider.label) verified.")
+        } catch { return .failure(error) }
     }
 }
 
@@ -554,5 +650,22 @@ enum Keychain {
         var item: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess, let data = item as? Data else { return nil }
         return String(data: data, encoding: .utf8)
+    }
+
+    static func save(service: String, account: String, value: String) {
+        remove(service: service, account: account)
+        let attributes: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecValueData as String: Data(value.utf8),
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
+        ]
+        SecItemAdd(attributes as CFDictionary, nil)
+    }
+
+    static func remove(service: String, account: String) {
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
+        SecItemDelete(query as CFDictionary)
     }
 }
