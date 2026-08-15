@@ -119,6 +119,18 @@ Active development (v0.2.0). Argus is building toward a polished macOS
 menu-bar monitor, a web dashboard, and a future Kallisti integration.
 Pre-1.0 versions may evolve the API contract.
 
+## Contributing
+
+The more the merrier. Join the Argus pool party.
+
+- **Add a provider** - new model providers show up constantly. The adapter
+  pattern in `argus_data.py` makes it a small, self-contained addition.
+- **Port the client** - the server is plain Python and runs anywhere. Build a
+  Linux or Windows tray client against the same snapshot contract.
+- **Polish the dashboard, docs, or tests** - all welcome.
+
+Full details, house rules, and the PR flow: [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## License
 
 [MIT](LICENSE).
