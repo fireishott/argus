@@ -59,8 +59,14 @@ struct StatusTargetChip: View {
 
     var body: some View {
         let color = preferences.color(for: target.remainingPercent)
+        let textStyleColor: Color = {
+            if target.kind == "balance" {
+                return preferences.balanceColor(for: target.balance, defaultColor: .primary)
+            }
+            return color
+        }()
         HStack(spacing: 3) {
-            TargetMark(provider: target.provider, iconMode: preferences.iconMode).foregroundStyle(color)
+            TargetMark(provider: target.provider, iconMode: preferences.iconMode, statusColor: color)
             Text(target.compactLabel).font(.system(size: 9, weight: .medium, design: .rounded)).foregroundStyle(.secondary)
             switch preferences.displayMode {
             case .usageBar:
@@ -70,7 +76,7 @@ struct StatusTargetChip: View {
             case .iconOnly:
                 EmptyView()
             default:
-                Text(target.valueText).monospacedDigit().foregroundStyle(color)
+                Text(target.valueText).monospacedDigit().foregroundStyle(textStyleColor)
             }
         }
         .help(target.label + ": " + target.valueText)
@@ -81,25 +87,44 @@ struct StatusTargetChip: View {
 struct TargetMark: View {
     let provider: String
     let iconMode: IconMode
+    var statusColor: Color = .white
+
     var body: some View {
-        switch iconMode {
-        case .brandMark:
-            if let image = ProviderIcon.image(for: provider) {
-                Image(nsImage: image).resizable().scaledToFit().frame(width: 14, height: 14)
-            } else {
-                Image(systemName: ProviderIcon.fallbackSymbol(for: provider)).frame(width: 14, height: 14)
+        let drawSlash = (statusColor == .red)
+        let markColor = drawSlash ? .primary : statusColor
+        
+        Group {
+            switch iconMode {
+            case .brandMark:
+                if let image = ProviderIcon.image(for: provider) {
+                    Image(nsImage: image).resizable().scaledToFit().frame(width: 14, height: 14)
+                } else {
+                    Image(systemName: ProviderIcon.fallbackSymbol(for: provider)).frame(width: 14, height: 14)
+                }
+            case .monogram:
+                Text(String(provider.prefix(2)).uppercased()).font(.system(size: 10, weight: .bold, design: .rounded)).frame(minWidth: 14)
+            case .systemSymbol:
+                Image(systemName: ProviderIcon.fallbackSymbol(for: provider)).font(.system(size: 12, weight: .semibold))
             }
-        case .monogram:
-            Text(String(provider.prefix(2)).uppercased()).font(.system(size: 10, weight: .bold, design: .rounded)).frame(minWidth: 14)
-        case .systemSymbol:
-            Image(systemName: ProviderIcon.fallbackSymbol(for: provider)).font(.system(size: 12, weight: .semibold))
+        }
+        .foregroundStyle(markColor)
+        .overlay {
+            if drawSlash {
+                GeometryReader { geometry in
+                    Path { path in
+                        path.move(to: CGPoint(x: 1, y: geometry.size.height - 1))
+                        path.addLine(to: CGPoint(x: geometry.size.width - 1, y: 1))
+                    }
+                    .stroke(Color.red, lineWidth: 1.5)
+                }
+            }
         }
     }
 }
 
 enum ProviderIcon {
     private static let assetNames: [String: String] = [
-        "claude": "claude", "deepseek": "deepseek", "minimax": "minimax",
+        "claude": "claude", "codex": "codex", "deepseek": "deepseek", "minimax": "minimax",
         "openrouter": "openrouter", "opencode-go": "opencode-go", "xiaomi-tokenplan": "mimo"
     ]
     static func image(for provider: String) -> NSImage? {
@@ -109,7 +134,7 @@ enum ProviderIcon {
     }
     static func fallbackSymbol(for provider: String) -> String {
         switch provider {
-        case "claude": "sparkle"; case "deepseek": "wave.3.right"; case "minimax": "bolt"; case "openrouter": "arrow.triangle.branch"; case "opencode-go": "chevron.left.forwardslash.chevron.right"; default: "cpu"
+        case "claude": "sparkle"; case "codex": "command"; case "deepseek": "wave.3.right"; case "minimax": "bolt"; case "openrouter": "arrow.triangle.branch"; case "opencode-go": "chevron.left.forwardslash.chevron.right"; default: "cpu"
         }
     }
 }
@@ -221,7 +246,11 @@ struct ProviderMark: View {
         case "antigravity":
             Image(systemName: "diamond")
         case "codex":
-            Image(systemName: "hexagon")
+            if let img = ProviderIcon.image(for: "codex") {
+                Image(nsImage: img)
+            } else {
+                Image(systemName: "command")
+            }
         case "deepseek":
             Image(systemName: "wave.3.right")
         case "minimax":
@@ -407,6 +436,11 @@ struct PersistedPreferences: Codable {
     var installedIndividualTargetLayout = false
     var statusLayoutRevision = 0
     var controlItemMigrationRevision = 0
+    
+    // Balance thresholds
+    var balanceWarningThreshold: Double = 10.00
+    var balanceCriticalThreshold: Double = 5.00
+    var balanceExhaustedThreshold: Double = 2.50
 }
 
 enum StoredColor: String, Codable, CaseIterable, Identifiable {
@@ -510,6 +544,22 @@ final class ArgusPreferences: ObservableObject {
         save()
     }
 
+    func balanceColor(for balance: Balance?, defaultColor: Color) -> Color {
+        guard let remaining = balance?.remaining else { return defaultColor }
+        if remaining < values.balanceExhaustedThreshold { return .red }
+        if remaining < values.balanceCriticalThreshold { return .orange }
+        if remaining < values.balanceWarningThreshold { return .yellow }
+        return defaultColor
+    }
+
+    func balanceNSColor(for balance: Balance?, defaultColor: NSColor) -> NSColor {
+        guard let remaining = balance?.remaining else { return defaultColor }
+        if remaining < values.balanceExhaustedThreshold { return .systemRed }
+        if remaining < values.balanceCriticalThreshold { return .systemOrange }
+        if remaining < values.balanceWarningThreshold { return .systemYellow }
+        return defaultColor
+    }
+
     func color(for remainingPercent: Int?) -> Color {
         guard let remainingPercent else { return values.unavailableColor.color }
         if remainingPercent <= values.criticalThreshold { return values.criticalColor.color }
@@ -583,6 +633,32 @@ struct ArgusSettingsView: View {
                 Stepper("Warning at \(preferences.values.warningThreshold)% or below", value: binding(\.warningThreshold), in: 1...99)
                 Stepper("Critical at \(preferences.values.criticalThreshold)% or below", value: binding(\.criticalThreshold), in: 0...preferences.values.warningThreshold)
             }
+            Section("Colors by remaining balance ($)") {
+                HStack {
+                    Text("Warning (Yellow) below")
+                    Spacer()
+                    TextField("Warning Threshold", value: binding(\.balanceWarningThreshold), format: .number)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 80)
+                        .multilineTextAlignment(.trailing)
+                }
+                HStack {
+                    Text("Critical (Orange) below")
+                    Spacer()
+                    TextField("Critical Threshold", value: binding(\.balanceCriticalThreshold), format: .number)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 80)
+                        .multilineTextAlignment(.trailing)
+                }
+                HStack {
+                    Text("Exhausted (Red) below")
+                    Spacer()
+                    TextField("Exhausted Threshold", value: binding(\.balanceExhaustedThreshold), format: .number)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 80)
+                        .multilineTextAlignment(.trailing)
+                }
+            }
             Section("Status bar layout") {
                 Text("Select an item, then pin it, remove it, or move it. The pinned list is the exact left-to-right menu-bar order.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -650,8 +726,9 @@ struct ArgusSettingsView: View {
     }
 
     @ViewBuilder private func targetRow(_ target: StatusTarget) -> some View {
+        let color = preferences.color(for: target.remainingPercent)
         HStack(spacing: 7) {
-            TargetMark(provider: target.provider, iconMode: preferences.iconMode).foregroundStyle(preferences.color(for: target.remainingPercent))
+            TargetMark(provider: target.provider, iconMode: preferences.iconMode, statusColor: color)
             Text(target.shortLabel).lineLimit(1)
             Spacer(minLength: 6)
             Text(target.valueText).monospacedDigit().foregroundStyle(.secondary)
@@ -1157,8 +1234,9 @@ final class ArgusStatusItems {
 
     private func configure(_ item: NSStatusItem, target: StatusTarget, provider: ProviderUsage?, preferences: ArgusPreferences, settingsWindow: ArgusSettingsWindow?, dashboardURL: URL?) {
         guard let button = item.button else { return }
-        let color = statusNSColor(target: target, preferences: preferences)
-        let textColor = statusTextNSColor(target: target, preferences: preferences)
+        let allWindows = provider?.windows ?? []
+        let color = statusNSColor(target: target, allWindows: allWindows, preferences: preferences)
+        let textColor = statusTextNSColor(target: target, allWindows: allWindows, preferences: preferences)
         let icon = ProviderIcon.image(for: target.provider) ?? NSImage(
             systemSymbolName: ProviderIcon.fallbackSymbol(for: target.provider),
             accessibilityDescription: target.label
@@ -1190,23 +1268,29 @@ final class ArgusStatusItems {
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     }
 
-    private func statusNSColor(target: StatusTarget, preferences: ArgusPreferences) -> NSColor {
-        if target.status == "inactive" || target.status == "unavailable" { return .systemRed }
-        if let remaining = target.remainingPercent {
-            if remaining <= preferences.values.criticalThreshold { return .systemRed }
-            if remaining <= preferences.values.warningThreshold { return .systemYellow }
+    private func statusNSColor(target: StatusTarget, allWindows: [UsageWindow], preferences: ArgusPreferences) -> NSColor {
+        if target.status == "inactive" || target.status == "unavailable" { return .white }
+        // Check ALL windows for the worst threshold, not just the displayed one
+        let worst = allWindows.compactMap(\.remainingPercent).min()
+        if let worstRemaining = worst {
+            if worstRemaining <= preferences.values.criticalThreshold { return .white }
+            if worstRemaining <= preferences.values.warningThreshold { return .systemYellow }
         } else if target.balance == nil {
-            return .systemRed
+            return .white
         }
         if target.status == "in_use" { return .systemGreen }
         return .white
     }
 
-    private func statusTextNSColor(target: StatusTarget, preferences: ArgusPreferences) -> NSColor {
+    private func statusTextNSColor(target: StatusTarget, allWindows: [UsageWindow], preferences: ArgusPreferences) -> NSColor {
+        if target.kind == "balance" {
+            return preferences.balanceNSColor(for: target.balance, defaultColor: .white)
+        }
         if target.status == "inactive" || target.status == "unavailable" { return .systemRed }
-        if let remaining = target.remainingPercent {
-            if remaining <= preferences.values.criticalThreshold { return .systemRed }
-            if remaining <= preferences.values.warningThreshold { return .systemYellow }
+        let worst = allWindows.compactMap(\.remainingPercent).min()
+        if let worstRemaining = worst {
+            if worstRemaining <= preferences.values.criticalThreshold { return .systemRed }
+            if worstRemaining <= preferences.values.warningThreshold { return .systemYellow }
         } else if target.balance == nil {
             return .systemRed
         }
@@ -1221,10 +1305,9 @@ final class ArgusStatusItems {
         let spacing: CGFloat = 2
         let width = iconSize.width + spacing + ceil(textSize.width)
         let height = max(iconSize.height, ceil(textSize.height))
-        let tintedIcon = icon.tinted(with: iconColor)
         let output = NSImage(size: NSSize(width: width, height: height))
         output.lockFocus()
-        tintedIcon.draw(in: NSRect(x: 0, y: (height - iconSize.height) / 2, width: iconSize.width, height: iconSize.height))
+        icon.draw(in: NSRect(x: 0, y: (height - iconSize.height) / 2, width: iconSize.width, height: iconSize.height))
         (text as NSString).draw(
             in: NSRect(x: iconSize.width + spacing, y: (height - textSize.height) / 2, width: ceil(textSize.width), height: ceil(textSize.height)),
             withAttributes: textAttrs
@@ -1234,16 +1317,19 @@ final class ArgusStatusItems {
     }
 
     private func statusItemImage(icon: NSImage, target: StatusTarget, preferences: ArgusPreferences, iconColor: NSColor, textColor: NSColor) -> NSImage {
+        let isUnavailable = (target.status == "inactive" || target.status == "unavailable")
+        let baseImage = isUnavailable ? icon.tinted(with: .white).withSlash() : icon.tinted(with: iconColor)
+        
         switch preferences.values.displayMode {
         case .usageBar:
-            return statusBarComposite(icon: icon, remainingPercent: target.remainingPercent, color: iconColor)
+            return statusBarComposite(icon: baseImage, remainingPercent: target.remainingPercent, color: iconColor)
         case .fuelGauge:
-            return statusGaugeComposite(icon: icon, remainingPercent: target.remainingPercent, color: iconColor)
+            return statusGaugeComposite(icon: baseImage, remainingPercent: target.remainingPercent, color: iconColor)
         case .iconOnly:
-            return icon.tinted(with: iconColor)
+            return baseImage
         default:
             let text = statusValueText(for: target, preferences: preferences)
-            return statusComposite(icon: icon, text: text, iconColor: iconColor, textColor: textColor)
+            return statusComposite(icon: baseImage, text: text, iconColor: iconColor, textColor: textColor)
         }
     }
 
@@ -1266,10 +1352,9 @@ final class ArgusStatusItems {
         let width = iconSize.width + spacing + barWidth
         let height = max(iconSize.height, barHeight)
         let used = CGFloat(max(0, min(100, 100 - (remainingPercent ?? 0)))) / 100.0
-        let tintedIcon = icon.tinted(with: color)
         let output = NSImage(size: NSSize(width: width, height: height))
         output.lockFocus()
-        tintedIcon.draw(in: NSRect(x: 0, y: (height - iconSize.height) / 2, width: iconSize.width, height: iconSize.height))
+        icon.draw(in: NSRect(x: 0, y: (height - iconSize.height) / 2, width: iconSize.width, height: iconSize.height))
         let barX = iconSize.width + spacing
         let barY = (height - barHeight) / 2
         let radius = barWidth / 2
@@ -1296,10 +1381,9 @@ final class ArgusStatusItems {
         let width = iconSize.width + spacing + gaugeWidth
         let height = max(iconSize.height, gaugeHeight)
         let used = CGFloat(max(0, min(100, 100 - (remainingPercent ?? 0)))) / 100.0
-        let tintedIcon = icon.tinted(with: color)
         let output = NSImage(size: NSSize(width: width, height: height))
         output.lockFocus()
-        tintedIcon.draw(in: NSRect(x: 0, y: (height - iconSize.height) / 2, width: iconSize.width, height: iconSize.height))
+        icon.draw(in: NSRect(x: 0, y: (height - iconSize.height) / 2, width: iconSize.width, height: iconSize.height))
         let gaugeX = iconSize.width + spacing
         let gaugeY = (height - gaugeHeight) / 2
         let radius: CGFloat = 2
@@ -1344,35 +1428,69 @@ struct ProviderDetailView: View {
     let provider: ProviderUsage
     let dashboardURL: URL?
 
+    private func colorForRemaining(_ remaining: Int?) -> Color {
+        guard let r = remaining else { return .secondary }
+        if r <= 5 { return .red }
+        if r <= 15 { return .yellow }
+        return .green
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(provider.label).font(.headline)
                 Spacer()
-                Text(provider.status.capitalized).font(.caption).foregroundStyle(.secondary)
+                Text(provider.status.capitalized)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             if let balance = provider.balanceShortText {
-                LabeledContent("Balance", value: balance).monospacedDigit()
+                HStack {
+                    Text("Balance").foregroundStyle(.secondary)
+                    Spacer()
+                    Text(balance).monospacedDigit()
+                }.font(.subheadline)
             }
             if !provider.windows.isEmpty {
                 Divider()
                 ForEach(provider.windows) { window in
-                    HStack {
+                    HStack(alignment: .firstTextBaseline) {
                         Text(window.label)
+                            .font(.subheadline)
+                            .frame(width: 50, alignment: .leading)
                         Spacer()
-                        Text(window.remainingText).monospacedDigit().foregroundStyle(.secondary)
+                        if let r = window.remainingPercent {
+                            Text("\(r)%")
+                                .monospacedDigit()
+                                .foregroundStyle(colorForRemaining(r))
+                                .font(.subheadline)
+                        } else {
+                            Text("--")
+                                .foregroundStyle(.secondary)
+                                .font(.subheadline)
+                        }
+                    }
+                    if let reset = window.resetText {
+                        HStack {
+                            Text(reset)
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                            Spacer()
+                        }.padding(.leading, 50)
                     }
                 }
             }
             Divider()
             HStack {
-                Text("Hover: quick peek").font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                if let dashboardURL { Link("Dashboard", destination: dashboardURL) }
+                if let dashboardURL {
+                    Link("Open Dashboard", destination: dashboardURL)
+                        .font(.caption)
+                }
             }
         }
-        .padding(14)
-        .frame(width: 310)
+        .padding(12)
+        .frame(width: 280)
     }
 }
 
@@ -1396,6 +1514,28 @@ extension NSImage {
         NSGraphicsContext.current?.cgContext.setBlendMode(.sourceAtop)
         color.set()
         rect.fill()
+        output.unlockFocus()
+        return output
+    }
+
+    func withSlash() -> NSImage {
+        let output = NSImage(size: size)
+        output.lockFocus()
+        // Draw base image
+        draw(in: NSRect(origin: .zero, size: size), from: .zero, operation: .sourceOver, fraction: 1)
+        
+        // Draw a diagonal red slash
+        if let context = NSGraphicsContext.current?.cgContext {
+            context.saveGState()
+            context.setStrokeColor(NSColor.systemRed.cgColor)
+            context.setLineWidth(1.5)
+            context.setLineCap(.round)
+            context.beginPath()
+            context.move(to: CGPoint(x: 1, y: 1))
+            context.addLine(to: CGPoint(x: size.width - 1, y: size.height - 1))
+            context.strokePath()
+            context.restoreGState()
+        }
         output.unlockFocus()
         return output
     }
@@ -1476,17 +1616,18 @@ struct ProviderUsage: Decodable, Identifiable {
     var balanceShortText: String? { balance.map(\.displayText) }
     var monogram: String { label.split(separator: " ").prefix(2).map { String($0.prefix(1)) }.joined().uppercased() }
     var symbolName: String { "cpu" }
-    var tooltip: String { "\(label): \(windows.map { "\($0.label) \($0.remainingText)" }.joined(separator: ", "))" }
+    var tooltip: String {
+        let worst = windows.compactMap(\.remainingPercent).min()
+        let worstText = worst.map { "\($0)% remaining" } ?? "no data"
+        let bal = balanceShortText.map { " · \($0)" } ?? ""
+        return "\(label) (\(status.capitalized))\(bal) · \(worstText)"
+    }
     var quickPeek: String {
-        let quota = windows.map { "\($0.label): \($0.remainingText)" }.joined(separator: " | ")
-        let balancePart = balanceShortText.map { " | Balance: \($0)" } ?? ""
-        let detail: String
-        if quota.isEmpty && balancePart.isEmpty {
-            detail = " | 0% available"
-        } else {
-            detail = (quota.isEmpty ? "" : " | \(quota)") + balancePart
-        }
-        return "\(label) - \(status.capitalized)\(detail)"
+        let worst = windows.compactMap(\.remainingPercent).min()
+        let worstText = worst.map { "\($0)%" } ?? "--"
+        let windowSummary = windows.map { "\($0.label) \($0.remainingPercent.map { "\($0)%" } ?? "--")" }.joined(separator: ", ")
+        let bal = balanceShortText.map { " \($0)" } ?? ""
+        return "\(label) \(status.capitalized) | \(windowSummary)\(bal)"
     }
     var accessibilitySummary: String { "\(label), \(tooltip), \(status)" }
 }

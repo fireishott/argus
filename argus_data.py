@@ -54,6 +54,7 @@ PROVIDER_LABELS = {
     "deepseek": "DeepSeek",
     "xai": "xAI",
     "codex": "Codex",
+    "antigravity": "Antigravity",
     "xiaomi-tokenplan": "MiMo",
     "openrouter": "OpenRouter",
     "minimax": "MiniMax",
@@ -386,6 +387,98 @@ def _claude_quota(access_token: str):
     return result
 
 
+def _codex_quota(access_token: str):
+    """Codex/OpenAI OAuth usage via the ChatGPT backend API.
+
+    Endpoints verified live (Aug 2026):
+    - GET /wham/usage           (rate limit windows with used_percent)
+    - GET /wham/accounts/check  (plan type, account info)
+
+    Auth: Bearer {access_token} (ChatGPT subscription OAuth token).
+    Base URL: https://chatgpt.com/backend-api
+    """
+    base_url = "https://chatgpt.com/backend-api"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "User-Agent": "codex-cli",
+    }
+    quotas = {}
+    plan = None
+
+    # Get plan info from accounts/check
+    try:
+        acct = _get_json(f"{base_url}/wham/accounts/check", headers)
+        accounts = acct.get("accounts") or []
+        if accounts:
+            plan_type = accounts[0].get("plan_type", "unknown")
+            plan = f"ChatGPT {plan_type.title()}"
+    except Exception:
+        pass
+
+    # Get rate limit data from /wham/usage
+    try:
+        usage = _get_json(f"{base_url}/wham/usage", headers)
+        rate_limit = usage.get("rate_limit") or {}
+
+        # Primary window (weekly usage limit)
+        primary = rate_limit.get("primary_window")
+        if primary and isinstance(primary, dict):
+            used_pct = primary.get("used_percent", 0)
+            remaining_pct = max(0, 100 - used_pct)
+            window_seconds = primary.get("limit_window_seconds", 604800)
+            reset_at_ts = primary.get("reset_at")
+
+            # Convert reset_at unix timestamp to ISO
+            reset_at = None
+            if reset_at_ts:
+                import datetime as _dt
+                reset_at = _dt.datetime.fromtimestamp(
+                    reset_at_ts, tz=_dt.timezone.utc
+                ).isoformat()
+
+            # Window label based on duration
+            if window_seconds >= 604800:
+                label = "weekly"
+                window_id = "7d"
+            elif window_seconds >= 86400:
+                label = "daily"
+                window_id = "day"
+            else:
+                label = "session"
+                window_id = "5h"
+
+            quotas[window_id] = {
+                "used": used_pct,
+                "total": 100,
+                "remaining": remaining_pct,
+                "remainingPercentage": remaining_pct,
+                "resetAt": reset_at,
+                "unlimited": False,
+                "label": label,
+            }
+
+        # Secondary window if present
+        secondary = rate_limit.get("secondary_window")
+        if secondary and isinstance(secondary, dict):
+            used_pct = secondary.get("used_percent", 0)
+            remaining_pct = max(0, 100 - used_pct)
+            quotas["5h"] = {
+                "used": used_pct,
+                "total": 100,
+                "remaining": remaining_pct,
+                "remainingPercentage": remaining_pct,
+                "resetAt": None,
+                "unlimited": False,
+                "label": "session (5h)",
+            }
+    except Exception as e:
+        return {"message": f"Codex usage unavailable: {e}"}
+
+    if quotas:
+        return {"quotas": quotas, "plan": plan or "Codex"}
+    return {"message": "Codex connected. No usage data returned."}
+
+
 def _mimo_quota(session_cookie: str):
     """MiMo quota adapter using a locally supplied session cookie.
 
@@ -473,6 +566,8 @@ def providers():
             item["quota"] = _opencode_quota(keys["opencode-go"])
         if provider == "claude" and keys.get("claude") and not item.get("quota"):
             item["quota"] = _claude_quota(keys["claude"])
+        if provider == "codex" and keys.get("codex") and not item.get("quota"):
+            item["quota"] = _codex_quota(keys["codex"])
         # MiMo: token-plan quota lives behind the Xiaomi platform console
         # (tp- key is chat-only). Uses the SSO/STS session from the MBP
         # MiMo session is injected through its configured local environment key.
