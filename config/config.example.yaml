@@ -26,6 +26,9 @@ sources:
     claude:
       enabled: true
       credential_env: ARGUS_CLAUDE_TOKEN
+    codex:
+      enabled: true
+      credential_env: ARGUS_CODEX_OAUTH_TOKEN
     minimax:
       enabled: true
       credential_env: ARGUS_MINIMAX_API_KEY
